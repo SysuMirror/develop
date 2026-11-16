@@ -1,5 +1,7 @@
 #+title: Developer
 
+Developer —— 一个 sse-market 的 developers 管理平台。
+
 * Architecture
 
 |             | developer | participant | leader | project    | demand         |
