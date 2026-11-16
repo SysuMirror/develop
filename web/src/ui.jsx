@@ -1,0 +1,151 @@
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { formatTime } from './api.js';
+
+export const APPLY_STATUS = {
+  waiting: { label: '等待中', tone: 'amber' },
+  accepted: { label: '已通过', tone: 'green' },
+  rejected: { label: '已拒绝', tone: 'red' },
+};
+
+export const DEMAND_STATUS = {
+  waiting: { label: '待接单', tone: 'amber' },
+  accepted: { label: '进行中', tone: 'blue' },
+  completed: { label: '已完成', tone: 'green' },
+};
+
+export const ROLE = {
+  leader: { label: 'Leader', tone: 'blue' },
+  participant: { label: '成员', tone: 'gray' },
+};
+
+export const APPLY_TYPE = {
+  leader: { label: '申请当 Leader', tone: 'blue' },
+  participant: { label: '申请加入', tone: 'gray' },
+};
+
+export function Avatar({ name = '?', src, size }) {
+  const cls = size === 'lg' ? 'avatar avatar--lg' : size === 'md' ? 'avatar avatar--md' : 'avatar';
+  return (
+    <span className={cls} aria-hidden="true">
+      {src ? <img src={src} alt="" /> : name.trim().slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+export function Badge({ tone = 'gray', children }) {
+  return <span className={`badge badge-${tone}`}>{children}</span>;
+}
+
+export function StatusBadge({ map, value }) {
+  const meta = map[value] || { label: value, tone: 'gray' };
+  return <Badge tone={meta.tone}>{meta.label}</Badge>;
+}
+
+export function TimeAgo({ value }) {
+  if (!value) return <span className="faint">—</span>;
+  return (
+    <span className="faint" title={new Date(value).toLocaleString('zh-CN')}>
+      {formatTime(value)}
+    </span>
+  );
+}
+
+export function Modal({ open, title, sub, onClose, children, footer, wide }) {
+  if (!open) return null;
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className={wide ? 'modal modal--wide' : 'modal'} role="dialog" aria-modal="true" aria-label={title}>
+        <h3>{title}</h3>
+        {sub ? <p className="modal__sub">{sub}</p> : null}
+        {children}
+        {footer ? <div className="modal__foot">{footer}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+export function Field({ label, hint, children }) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      {children}
+      {hint ? <span className="faint">{hint}</span> : null}
+    </div>
+  );
+}
+
+export function Empty({ title = '暂无数据', hint }) {
+  return (
+    <div className="empty">
+      <strong>{title}</strong>
+      {hint || '换个筛选条件试试。'}
+    </div>
+  );
+}
+
+export function Skeleton({ rows = 3 }) {
+  return (
+    <div>
+      {Array.from({ length: rows }).map((_, index) => (
+        <div className="skeleton-row" key={index} />
+      ))}
+    </div>
+  );
+}
+
+export function Pager({ page, pageSize, total, onPage }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (total <= pageSize) return null;
+  return (
+    <div className="pager">
+      <span>
+        共 {total} 条 · 第 {page} / {pages} 页
+      </span>
+      <div className="pager__btns">
+        <button className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          上一页
+        </button>
+        <button className="btn btn-secondary btn-sm" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+          下一页
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const ToastContext = createContext(null);
+
+export function ToastProvider({ children }) {
+  const [items, setItems] = useState([]);
+  const push = useCallback((message, tone = 'info') => {
+    const id = Math.random().toString(36).slice(2);
+    setItems((prev) => [...prev.slice(-2), { id, message, tone }]);
+    window.setTimeout(() => {
+      setItems((prev) => prev.filter((item) => item.id !== id));
+    }, 3200);
+  }, []);
+  const value = useMemo(() => ({ push }), [push]);
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <div className="toast-stack">
+        {items.map((item) => (
+          <div key={item.id} className={`notice notice-${item.tone} toast`}>
+            {item.message}
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast() {
+  const ctx = useContext(ToastContext);
+  if (!ctx) throw new Error('useToast 必须在 ToastProvider 内使用');
+  return ctx;
+}
