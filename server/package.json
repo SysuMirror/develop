@@ -1,0 +1,18 @@
+{
+  "name": "developer-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Developer 平台后端（Express + MySQL + UniSSO OAuth2）",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "migrate": "node src/migrate.js",
+    "seed": "SEED=1 node src/migrate.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mysql2": "^3.11.5"
+  }
+}
