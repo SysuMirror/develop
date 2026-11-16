@@ -67,3 +67,33 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 
 #+RESULTS:
 [[file:./static/er-clean.png]]
+
+* 运行
+
+前后端同仓：=server/= 是 Express + MySQL 的 API，=web/= 是 React + Vite 前端。
+后端在 8080 上同时提供 =/api= 和前端构建产物，因此只需要一个进程。
+
+** 后端
+
+#+begin_src sh
+  cd server
+  cp .env.example .env      # 填 MYSQL_* 等
+  npm install
+  npm run migrate           # 建表；SEED=1 时顺便造演示数据
+  npm start                 # 0.0.0.0:8080
+#+end_src
+
+** 前端
+
+#+begin_src sh
+  cd web
+  npm install
+  npm run build             # 产物给后端托管
+  npm run dev               # 或开发模式 5173，/api 代理到 8080
+#+end_src
+
+** 登录
+
+=auth= 走 UniSSO（=https://sso.ssemarket.cn=，授权码 + PKCE）。配置 =SSO_CLIENT_ID= /
+=SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
+未配置时若 =DEV_LOGIN=1=，=/login= 页面会列出演示开发者供点击登录，便于本地联调。
