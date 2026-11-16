@@ -1,0 +1,67 @@
+#+title: Developer
+
+* Architecture
+
+|             | developer | participant | leader | project    | demand         |
+|-------------+-----------+-------------+--------+------------+----------------|
+| developer   |           |             |        | apply      |                |
+| participant | is        |             |        | apply/quit | release/accept |
+| leader      | is/accept | fire        |        |            |                |
+| project     |           |             |        |            |                |
+| demand      |           |             |        |            |                |
+
+五个表格 developers, projects, proj_member, applies, demands.
+#+begin_src dot :file ./static/er-clean.png :exports results
+  digraph ER_Clean {
+    rankdir=LR;
+    ranksep=2.0;
+
+    node [ shape=Mrecord ];
+    edge [ dir=both ];
+
+    developers
+    [ label="developers |
+     id : [PK]\l
+     name\l" ];
+
+    projects
+    [ label="projects |
+     id : [PK]\l
+     title\l
+     misc\l" ];
+
+    project_member
+    [ label="project_member |
+     id : [PK]\l
+     developer_id : [FK]\l
+     project_id : [FK]\l
+     role : leader / participant" ];
+
+    applies
+    [ label="applies |
+     id : [PK]\l
+     developer_id : [FK]\l
+     project_id : [FK]\l
+     type : leader / participant\l
+     status : waiting / accepted / rejected" ];
+
+    demands
+    [ label="demands |
+     id : [PK]\l
+     developer_id : [FK]\l
+     project_id : [FK]\l
+     status : waiting / accepted / completed"]
+
+     developers -> project_member [arrowtail=teetee, arrowhead=crowodot];
+     projects -> project_member [arrowtail=teetee, arrowhead=crowtee];
+
+     developers -> applies [arrowtail=teetee, arrowhead=crowodot];
+     projects -> applies [arrowtail=teetee, arrowhead=crowodot];
+
+     developers -> demands [arrowtail=teetee, arrowhead=crowodot];
+     projects -> demands [arrowtail=teetee, arrowhead=crowodot];
+   }
+#+end_src
+
+#+RESULTS:
+[[file:./static/er-clean.png]]
