@@ -30,7 +30,13 @@ export function createApp() {
   app.get('/api/health', async (_req, res) => {
     try {
       await pool.query('SELECT 1');
-      res.json({ ok: true, db: 'up', sso: auth.ssoConfigured(), devLogin: auth.devLoginEnabled() });
+      res.json({
+        ok: true,
+        db: 'up',
+        sso: auth.ssoConfigured(),
+        devLogin: auth.devLoginEnabled(),
+        developerGate: true,
+      });
     } catch (error) {
       res.status(503).json({ ok: false, db: 'down', message: error.message });
     }
@@ -47,6 +53,8 @@ export function createApp() {
   app.use('/api/join', joinRouter);
 
   app.use('/api', auth.requireUser);
+  // 开发者业务要求 UniSSO userinfo 的 developer 严格为 true（DEV_LOGIN 会话除外）。
+  app.use('/api', wrap(auth.requireDeveloper));
   app.use('/api', developersRouter);
   app.use('/api', projectsRouter);
   app.use('/api', appliesRouter);
