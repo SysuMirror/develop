@@ -70,7 +70,7 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 
 * 运行
 
-前后端同仓：=server/= 是 Express + MySQL 的 API，=web/= 是 React + Vite 前端。
+前后端同仓： =server/= 是 Express + MySQL 的 API， =web/= 是 React + Vite 前端。
 后端在 8080 上同时提供 =/api= 和前端构建产物，因此只需要一个进程。
 
 ** 后端
@@ -96,7 +96,7 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 
 =auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE）。配置 =SSO_CLIENT_ID= /
 =SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
-未配置时若 =DEV_LOGIN=1=，=/login= 页面会列出演示开发者供点击登录，便于本地联调。
+未配置时若 =DEV_LOGIN=1= ， =/login= 页面会列出演示开发者供点击登录，便于本地联调。
 
 ** join 平台接入
 
@@ -123,8 +123,8 @@ join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/ap
 - =note= （可选）：不超过 500 字；
 - =name= / =email= （可选）：仅在新建 developer 时使用，缺省名称为「开发者」。
 
-返回：新建申请 =201=，已存在的等待中申请 =200= 且 =duplicate=true=，已通过的申请 =200= 且
-=status: accepted=、=duplicate=true=，被拒后重新提交 =200= 且 =reopened=true= ，已是成员 =409= 。
+返回：新建申请 =201= ，已存在的等待中申请 =200= 且 =duplicate=true= ，已通过的申请 =200= 且
+=status: accepted= 、 =duplicate=true= ，被拒后重新提交 =200= 且 =reopened=true= ，已是成员 =409= 。
 申请进入现有的待审列表，leader 在项目页或「我的」页面通过 / 拒绝；通过后写入
 =project_member= ，简历链接会显示在申请箱里。
 
