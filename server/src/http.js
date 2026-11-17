@@ -80,7 +80,7 @@ export function redirectSafe(req, res, target, { allowedOrigins = [] } = {}) {
     }
   }
   // 校验后只重新拼 origin + path + query，避免把未经检查的整串直接传出。
-  const finalUrl = allow.has(url.origin) ? `${origin}${url.pathname}${url.search}${url.hash}` : `${origin}/`;
+  const finalUrl = allow.has(url.origin) ? `${url.origin}${url.pathname}${url.search}${url.hash}` : `${origin}/`;
   res.status(302);
   res.setHeader('Location', finalUrl);
   res.end();
