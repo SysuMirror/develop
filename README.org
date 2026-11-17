@@ -98,6 +98,26 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 =SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
 未配置时若 =DEV_LOGIN=1= ， =/login= 页面会列出演示开发者供点击登录，便于本地联调。
 
+登录后平台用会话保存的 access token 调 =/api/oauth/userinfo= ，只有 =developer === true=
+才放行项目、申请、需求等业务接口；不带该字段、为 false 或类型不对一律拒绝。结果按
+=SSO_DEVELOPER_TTL_SECONDS= （默认 60 秒）缓存，可按需调低或设为 0 关闭缓存。
+
+- 未获资格：业务接口返回 =403 NOT_DEVELOPER= ，前端展示认证引导页；
+- 身份服务不可用：返回 =503 SSO_UNAVAILABLE= ，本地会话保留；
+- access token 失效：清除会话并返回 =401 SSO_SESSION_EXPIRED= ，需重新登录。
+
+=DEV_LOGIN= 会话不查 SSO，直接视为有资格；=GET /api/auth/me= 会带 =developer= 与
+=qualification= （ =ok= / =none= / =unknown= ）供前端判断。
+
+资格写入（Join 方向）：申请通过时写 =is_developer=true= ；被 leader 开除、退出项目或释放项目后，
+若已不属于任何项目则写 =false= 。写入失败不阻塞业务，落在 =developer_qual_sync= 表由后台按
+=QUAL_SYNC_INTERVAL_MS= 重试同一目标值（指数退避，最多 20 次；=400/401/403/404= 视为终态）。
+写入复用 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= ，平台侧需把本应用加入
+=UNISSO_DEVELOPER_WRITE_CLIENTS= 并开启 =m2m_enabled= ；未配置凭证时写入暂停，业务不受影响。
+
+注意：线上 SSO 需部署返回 =developer= 的版本（unisso 提交 =f2d9e9c= 及以后）。旧版本会让真实账号
+全部落在 403，=DEV_LOGIN= 不受影响；升级前创建的会话没有 access token，需要重新登录。
+
 ** join 平台接入
 
 join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替 developer
