@@ -9,6 +9,7 @@ import DeveloperDetailPage from './pages/DeveloperDetailPage.jsx';
 import DemandsPage from './pages/DemandsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import NoQualificationPage from './pages/NoQualificationPage.jsx';
 
 const NAV = [
   { to: '/', label: '概览', end: true },
@@ -91,6 +92,8 @@ function RequireAuth({ children }) {
     const target = location.pathname + location.search;
     return <Navigate to={`/login?redirect=${encodeURIComponent(target)}`} replace />;
   }
+  // 服务端已按资格拦截业务接口，这里只负责给出可操作的提示页。
+  if (user.developer !== true) return <NoQualificationPage />;
   return children;
 }
 

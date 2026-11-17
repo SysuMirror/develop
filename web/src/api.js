@@ -7,6 +7,15 @@ export class ApiError extends Error {
   }
 }
 
+// 与 server/src/auth.js 的错误码保持一致，给用户可操作的文案。
+const ERROR_TEXT = {
+  NOT_DEVELOPER: '尚未获得开发者资格',
+  SSO_SESSION_EXPIRED: '登录已过期，请重新登录',
+  SSO_TOKEN_REJECTED: '登录已过期，请重新登录',
+  SSO_UNAVAILABLE: '身份服务暂时不可用，请稍后重试',
+  SSO_USERINFO_FAILED: '身份服务暂时不可用，请稍后重试',
+};
+
 export function qs(params = {}) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -39,9 +48,10 @@ async function request(path, { method = 'GET', body } = {}) {
     }
   }
   if (!res.ok) {
-    throw new ApiError(data?.error?.message || `请求失败（HTTP ${res.status}）`, {
+    const code = data?.error?.code || 'HTTP_' + res.status;
+    throw new ApiError(ERROR_TEXT[code] || data?.error?.message || `请求失败（HTTP ${res.status}）`, {
       status: res.status,
-      code: data?.error?.code || 'HTTP_' + res.status,
+      code,
     });
   }
   return data;
