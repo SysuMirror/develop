@@ -94,13 +94,13 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 
 ** 登录
 
-=auth= 走 UniSSO（=https://sso.ssemarket.cn=，授权码 + PKCE）。配置 =SSO_CLIENT_ID= /
+=auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE）。配置 =SSO_CLIENT_ID= /
 =SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
 未配置时若 =DEV_LOGIN=1=，=/login= 页面会列出演示开发者供点击登录，便于本地联调。
 
 ** join 平台接入
 
-join 平台（=https://join.ssemarket.cn=）的后端调用 =POST /api/join/applies=，替 developer
+join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替 developer
 提交 participant 申请。该接口不走 UniSSO 会话，用共享密钥 =JOIN_API_KEY= 鉴权：
 
 #+begin_src sh
@@ -117,15 +117,15 @@ join 平台（=https://join.ssemarket.cn=）的后端调用 =POST /api/join/appl
 
 也可以把密钥放在 =X-Api-Key= 头里。请求字段：
 
-- =ssoSub=（必填）：developer 的 UniSSO sub，对应 =developers.sso_sub=；
-- =projectId=（必填）：本平台 =projects.id=；
-- =resumeUrl=（必填）：http/https 简历地址，审批时由前端直接下载；
-- =note=（可选）：不超过 500 字；
-- =name= / =email=（可选）：仅在新建 developer 时使用，缺省名称为「开发者」。
+- =ssoSub= （必填）：developer 的 UniSSO sub，对应 =developers.sso_sub= ；
+- =projectId= （必填）：本平台 =projects.id= ；
+- =resumeUrl= （必填）：http/https 简历地址，审批时由前端直接下载；
+- =note= （可选）：不超过 500 字；
+- =name= / =email= （可选）：仅在新建 developer 时使用，缺省名称为「开发者」。
 
 返回：新建申请 =201=，已存在的等待中申请 =200= 且 =duplicate=true=，已通过的申请 =200= 且
-=status: accepted=、=duplicate=true=，被拒后重新提交 =200= 且 =reopened=true=，已是成员 =409=。
+=status: accepted=、=duplicate=true=，被拒后重新提交 =200= 且 =reopened=true= ，已是成员 =409= 。
 申请进入现有的待审列表，leader 在项目页或「我的」页面通过 / 拒绝；通过后写入
-=project_member=，简历链接会显示在申请箱里。
+=project_member= ，简历链接会显示在申请箱里。
 
-=JOIN_API_KEY= 留空时该组接口一律返回 =503=。
+=JOIN_API_KEY= 留空时该组接口一律返回 =503= 。
