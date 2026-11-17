@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { loadMembership, loadProject, requireApplyDecider } from '../access.js';
 import { one, query, withTx } from '../db.js';
 import { badRequest, conflict, forbidden, notFound, wrap } from '../http.js';
+import { enqueueQualification } from '../qual-sync.js';
 
 const router = Router();
 
@@ -136,6 +137,13 @@ router.post(
         [req.user.id, apply.project_id, apply.id],
       );
     });
+    // 审批通过即授予全局开发者资格；写入失败不影响审批，由待同步表重试。
+    try {
+      const developer = await one('SELECT sso_sub FROM developers WHERE id = ?', [apply.developer_id]);
+      if (developer) await enqueueQualification(apply.developer_id, developer.sso_sub, true);
+    } catch (error) {
+      console.error('[qual-sync] enqueue grant failed', error.message);
+    }
     res.json({ ok: true });
   }),
 );

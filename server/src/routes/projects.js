@@ -2,8 +2,18 @@ import { Router } from 'express';
 import { loadMembership, loadProject, requireLeader } from '../access.js';
 import { query, withTx } from '../db.js';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.js';
+import { revokeIfNoMembership } from '../qual-sync.js';
 
 const router = Router();
+
+// 成员关系变更后，不再属于任何项目的开发者撤销 UniSSO 资格；失败不阻塞业务。
+async function syncAfterRemoval(developerId) {
+  try {
+    await revokeIfNoMembership(developerId);
+  } catch (error) {
+    console.error('[qual-sync] revoke check failed', error.message);
+  }
+}
 
 const PROJECT_SUMMARY = `
   SELECT p.id, p.title, p.misc, p.created_at, p.updated_at, p.leader_id,
@@ -200,6 +210,7 @@ router.post(
       ]);
       await conn.query('UPDATE projects SET leader_id = NULL WHERE id = ?', [project.id]);
     });
+    await syncAfterRemoval(req.user.id);
     res.json({ ok: true });
   }),
 );
@@ -214,6 +225,7 @@ router.delete(
     const membership = await loadMembership(project.id, req.user.id);
     if (!membership) throw notFound('你不是该项目成员');
     await query('DELETE FROM project_member WHERE project_id = ? AND developer_id = ?', [project.id, req.user.id]);
+    await syncAfterRemoval(req.user.id);
     res.json({ ok: true });
   }),
 );
@@ -228,6 +240,7 @@ router.delete(
     const membership = await loadMembership(project.id, targetId);
     if (!membership) throw notFound('该开发者不是项目成员');
     await query('DELETE FROM project_member WHERE project_id = ? AND developer_id = ?', [project.id, targetId]);
+    await syncAfterRemoval(targetId);
     res.json({ ok: true });
   }),
 );
