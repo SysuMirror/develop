@@ -8,6 +8,7 @@ import {
   APPLY_TYPE,
   ROLE,
   Avatar,
+  Badge,
   Empty,
   Skeleton,
   StatusBadge,
@@ -59,10 +60,24 @@ export default function ProfilePage() {
                 <div className="truncate">
                   {apply.developer.name} → <Link to={`/projects/${apply.project.id}`}>{apply.project.title}</Link>{' '}
                   <StatusBadge map={APPLY_TYPE} value={apply.type} />
+                  {apply.source === 'join' ? (
+                    <>
+                      {' '}
+                      <Badge tone="blue">来自 join</Badge>
+                    </>
+                  ) : null}
                 </div>
                 <div className="faint">
                   {apply.note ? `${apply.note} · ` : ''}
                   <TimeAgo value={apply.createdAt} />
+                  {apply.resumeUrl ? (
+                    <>
+                      {' · '}
+                      <a className="btn-link" href={apply.resumeUrl} target="_blank" rel="noreferrer">
+                        下载简历
+                      </a>
+                    </>
+                  ) : null}
                 </div>
               </div>
               <div className="row" style={{ gap: 6 }}>
