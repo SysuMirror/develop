@@ -31,6 +31,12 @@ async function migrate() {
   }
   await ensureColumn('applies', 'resume_url', 'resume_url VARCHAR(2048) NULL AFTER note');
   await ensureColumn('applies', 'source', "source ENUM('web','join') NOT NULL DEFAULT 'web' AFTER resume_url");
+  await ensureColumn('sessions', 'access_token', 'access_token TEXT NULL AFTER developer_id');
+  await ensureColumn(
+    'sessions',
+    'access_token_expires_at',
+    'access_token_expires_at DATETIME NULL AFTER access_token',
+  );
   console.log(`schema ok (${statements.length} statements)`);
 }
 

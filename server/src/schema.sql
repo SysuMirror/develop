@@ -76,9 +76,28 @@ CREATE TABLE IF NOT EXISTS demands (
 CREATE TABLE IF NOT EXISTS sessions (
   id CHAR(43) NOT NULL,
   developer_id INT UNSIGNED NOT NULL,
+  access_token TEXT NULL,
+  access_token_expires_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME NOT NULL,
   PRIMARY KEY (id),
   KEY idx_sessions_developer (developer_id),
   KEY idx_sessions_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- 开发者资格写入 UniSSO 的待同步队列：每个开发者只保留最新目标值
+CREATE TABLE IF NOT EXISTS developer_qual_sync (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  developer_id INT UNSIGNED NOT NULL,
+  sso_sub VARCHAR(64) NOT NULL,
+  target_value TINYINT(1) NOT NULL,
+  status ENUM('pending','done','failed') NOT NULL DEFAULT 'pending',
+  attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  last_error VARCHAR(255) NULL,
+  next_attempt_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_qual_sync_developer (developer_id),
+  KEY idx_qual_sync_pending (status, next_attempt_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
