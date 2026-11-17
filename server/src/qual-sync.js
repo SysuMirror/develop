@@ -1,0 +1,123 @@
+import { one, query } from './db.js';
+import { qualificationWriteEnabled, updateDeveloperQualification } from './unisso.js';
+
+// 每个开发者只保留最新目标值；重试同一目标值即可，不需要补偿历史。
+const MAX_ATTEMPTS = 20;
+const BACKOFF_CAP_MS = 10 * 60_000;
+const DEFAULT_RETRY_MS = 3000;
+
+let timer = null;
+let running = false;
+let disabledLogged = false;
+
+function toMysqlDate(date) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function backoffMs(attempts, retryAfterMs = 0) {
+  const exponential = Math.min(DEFAULT_RETRY_MS * 2 ** Math.max(0, attempts - 1), BACKOFF_CAP_MS);
+  return Math.max(exponential, retryAfterMs);
+}
+
+export async function enqueueQualification(developerId, ssoSub, targetValue) {
+  if (!ssoSub) return;
+  await query(
+    `INSERT INTO developer_qual_sync (developer_id, sso_sub, target_value, status, attempts, last_error, next_attempt_at)
+     VALUES (?, ?, ?, 'pending', 0, NULL, NOW())
+     ON DUPLICATE KEY UPDATE
+       sso_sub = VALUES(sso_sub),
+       target_value = VALUES(target_value),
+       status = 'pending',
+       attempts = 0,
+       last_error = NULL,
+       next_attempt_at = NOW()`,
+    [developerId, ssoSub, targetValue ? 1 : 0],
+  );
+  // 立即尝试一次，不阻塞调用方；失败由下一轮重试。
+  void runQualSyncOnce().catch((error) => console.error('[qual-sync]', error.message));
+}
+
+// 被开除 / 退出 / 释放项目后调用：只有确实不再属于任何项目才撤销资格。
+export async function revokeIfNoMembership(developerId) {
+  const [{ n }] = await query('SELECT COUNT(*) AS n FROM project_member WHERE developer_id = ?', [developerId]);
+  if (Number(n) > 0) return false;
+  const developer = await one('SELECT id, sso_sub FROM developers WHERE id = ?', [developerId]);
+  if (!developer) return false;
+  await enqueueQualification(developer.id, developer.sso_sub, false);
+  return true;
+}
+
+async function pushRow(row) {
+  const target = Number(row.target_value) === 1;
+  const result = await updateDeveloperQualification(row.sso_sub, target);
+  if (result.developer !== target) {
+    // 写入成功但读回值不一致（并发写入），按可重试处理，下一轮再写同一目标值。
+    const error = new Error(`qualification mismatch: want ${target}, got ${result.developer}`);
+    error.retryable = true;
+    throw error;
+  }
+  await query("UPDATE developer_qual_sync SET status = 'done', last_error = NULL WHERE id = ?", [row.id]);
+}
+
+async function markFailure(row, error) {
+  const attempts = Number(row.attempts) + 1;
+  const terminal = error.retryable === false || attempts >= MAX_ATTEMPTS;
+  if (terminal) {
+    await query("UPDATE developer_qual_sync SET status = 'failed', attempts = ?, last_error = ? WHERE id = ?", [
+      attempts,
+      String(error.message || error).slice(0, 255),
+      row.id,
+    ]);
+    console.error(`[qual-sync] developer ${row.developer_id} failed: ${error.message || error}`);
+    return;
+  }
+  const next = new Date(Date.now() + backoffMs(attempts, error.retryAfterMs || 0));
+  await query(
+    `UPDATE developer_qual_sync
+        SET attempts = ?, last_error = ?, next_attempt_at = ?
+      WHERE id = ?`,
+    [attempts, String(error.message || error).slice(0, 255), toMysqlDate(next), row.id],
+  );
+}
+
+export async function runQualSyncOnce() {
+  if (running) return;
+  if (!qualificationWriteEnabled()) {
+    if (!disabledLogged) {
+      console.warn('[qual-sync] 未配置 SSO 凭证，资格写入暂停');
+      disabledLogged = true;
+    }
+    return;
+  }
+  running = true;
+  try {
+    const rows = await query(
+      `SELECT id, developer_id, sso_sub, target_value, attempts
+         FROM developer_qual_sync
+        WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+        ORDER BY next_attempt_at, id
+        LIMIT 20`,
+    );
+    for (const row of rows) {
+      try {
+        await pushRow(row);
+      } catch (error) {
+        await markFailure(row, error);
+      }
+    }
+  } finally {
+    running = false;
+  }
+}
+
+export function startQualSyncWorker() {
+  const interval = Number(process.env.QUAL_SYNC_INTERVAL_MS ?? 15000);
+  if (!Number.isFinite(interval) || interval <= 0) return null;
+  if (timer) return timer;
+  timer = setInterval(() => {
+    void runQualSyncOnce().catch((error) => console.error('[qual-sync]', error.message));
+  }, interval);
+  // 不阻止进程退出；服务器本身由 listen 保活。
+  timer.unref?.();
+  return timer;
+}

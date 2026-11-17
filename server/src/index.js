@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import * as auth from './auth.js';
 import { parseCookies, wrap } from './http.js';
 import { pool } from './db.js';
+import { startQualSyncWorker } from './qual-sync.js';
 import appliesRouter from './routes/applies.js';
 import demandsRouter from './routes/demands.js';
 import developersRouter from './routes/developers.js';
@@ -102,4 +103,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   createApp().listen(port, '0.0.0.0', () => {
     console.log(`api listening on 0.0.0.0:${port}`);
   });
+  startQualSyncWorker();
 }
