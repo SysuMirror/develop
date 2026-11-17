@@ -6,6 +6,20 @@ import { pool, query } from './db.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// CREATE TABLE IF NOT EXISTS 不会给旧表补列，已存在的库靠这里增量迁移。
+async function ensureColumn(table, column, definition) {
+  const [{ n }] = await query(
+    `SELECT COUNT(*) AS n
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [table, column],
+  );
+  if (Number(n) > 0) return false;
+  await query(`ALTER TABLE \`${table}\` ADD COLUMN ${definition}`);
+  console.log(`added column ${table}.${column}`);
+  return true;
+}
+
 async function migrate() {
   const sql = fs.readFileSync(path.join(here, 'schema.sql'), 'utf8');
   const statements = sql
@@ -15,6 +29,8 @@ async function migrate() {
   for (const statement of statements) {
     await query(statement);
   }
+  await ensureColumn('applies', 'resume_url', 'resume_url VARCHAR(2048) NULL AFTER note');
+  await ensureColumn('applies', 'source', "source ENUM('web','join') NOT NULL DEFAULT 'web' AFTER resume_url");
   console.log(`schema ok (${statements.length} statements)`);
 }
 

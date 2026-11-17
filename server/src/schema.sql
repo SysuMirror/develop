@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS applies (
   type ENUM('leader','participant') NOT NULL,
   status ENUM('waiting','accepted','rejected') NOT NULL DEFAULT 'waiting',
   note VARCHAR(500) NULL,
+  resume_url VARCHAR(2048) NULL,
+  source ENUM('web','join') NOT NULL DEFAULT 'web',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   decided_at DATETIME NULL,
   decided_by INT UNSIGNED NULL,

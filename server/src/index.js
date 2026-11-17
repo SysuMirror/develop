@@ -9,6 +9,7 @@ import { pool } from './db.js';
 import appliesRouter from './routes/applies.js';
 import demandsRouter from './routes/demands.js';
 import developersRouter from './routes/developers.js';
+import joinRouter from './routes/join.js';
 import projectsRouter from './routes/projects.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -41,6 +42,9 @@ export function createApp() {
   app.post('/api/auth/logout', wrap(auth.logout));
   app.get('/api/auth/dev/identities', wrap(auth.devIdentities));
   app.post('/api/auth/dev-login', wrap(auth.devLogin));
+
+  // join 平台是后端到后端调用，不走 UniSSO 会话，自己用共享密钥鉴权。
+  app.use('/api/join', joinRouter);
 
   app.use('/api', auth.requireUser);
   app.use('/api', developersRouter);

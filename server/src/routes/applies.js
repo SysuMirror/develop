@@ -6,7 +6,7 @@ import { badRequest, conflict, forbidden, notFound, wrap } from '../http.js';
 const router = Router();
 
 const APPLY_SELECT = `
-  SELECT a.id, a.type, a.status, a.note, a.created_at, a.decided_at,
+  SELECT a.id, a.type, a.status, a.note, a.resume_url, a.source, a.created_at, a.decided_at,
          a.project_id, p.title AS project_title, p.leader_id,
          a.developer_id, d.name AS developer_name, d.avatar AS developer_avatar
     FROM applies a
@@ -19,6 +19,8 @@ function mapApply(row) {
     type: row.type,
     status: row.status,
     note: row.note,
+    resumeUrl: row.resume_url,
+    source: row.source,
     createdAt: row.created_at,
     decidedAt: row.decided_at,
     project: { id: row.project_id, title: row.project_title },
