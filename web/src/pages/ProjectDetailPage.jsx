@@ -15,6 +15,7 @@ import {
   Skeleton,
   StatusBadge,
   TimeAgo,
+  displayName,
   useToast,
 } from '../ui.jsx';
 
@@ -117,9 +118,9 @@ export default function ProjectDetailPage() {
           <dt>Leader</dt>
           <dd>
             {leader ? (
-              <Link to={`/developers/${leader.id}`} className="row" style={{ gap: 6, display: 'inline-flex' }}>
-                <Avatar name={leader.name} src={leader.avatar} />
-                {leader.name}
+              <Link to={`/users/${leader.id}`} className="row" style={{ gap: 6, display: 'inline-flex' }}>
+                <Avatar name={displayName(leader)} src={leader.avatar} />
+                {displayName(leader)}
               </Link>
             ) : (
               <span className="faint">空缺 · 可在下方申请成为 Leader</span>
@@ -141,28 +142,28 @@ export default function ProjectDetailPage() {
       <div className="panel">
         <div className="list">
           {data.members.map((member) => (
-            <div className="list__row" key={member.developerId}>
-              <Avatar name={member.name} src={member.avatar} />
+            <div className="list__row" key={member.userId}>
+              <Avatar name={displayName(member)} src={member.avatar} />
               <div className="grow">
-                <Link to={`/developers/${member.developerId}`}>{member.name}</Link>
+                <Link to={`/users/${member.userId}`}>{displayName(member)}</Link>
                 <div className="faint">
                   加入于 <TimeAgo value={member.joinedAt} />
                 </div>
               </div>
               <StatusBadge map={ROLE} value={member.role} />
-              {isLeader && member.developerId !== user.id ? (
+              {isLeader && member.userId !== user.id ? (
                 <div className="row" style={{ gap: 4 }}>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    onClick={() => run(() => api.post(`/projects/${id}/transfer`, { developerId: member.developerId }), '已转让 leader')}
+                    onClick={() => run(() => api.post(`/projects/${id}/transfer`, { userId: member.userId }), '已转让 leader')}
                   >
                     转让
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm btn-danger"
-                    onClick={() => run(() => api.del(`/projects/${id}/members/${member.developerId}`), '已移出成员')}
+                    onClick={() => run(() => api.del(`/projects/${id}/members/${member.userId}`), '已移出成员')}
                   >
                     移出
                   </button>
@@ -186,10 +187,10 @@ export default function ProjectDetailPage() {
               <div className="list">
                 {applyItems.map((apply) => (
                   <div className="list__row" key={apply.id}>
-                    <Avatar name={apply.developer.name} src={apply.developer.avatar} />
+                    <Avatar name={displayName(apply.user)} src={apply.user.avatar} />
                     <div className="grow">
                       <div className="truncate">
-                        <Link to={`/developers/${apply.developer.id}`}>{apply.developer.name}</Link>{' '}
+                        <Link to={`/users/${apply.user.id}`}>{displayName(apply.user)}</Link>{' '}
                         <StatusBadge map={APPLY_TYPE} value={apply.type} />
                         {apply.source === 'join' ? (
                           <>
@@ -337,7 +338,7 @@ export default function ProjectDetailPage() {
       <Modal
         open={dialog?.kind === 'release'}
         title="释放项目"
-        sub="释放后你将不再是成员，项目进入招募 Leader 状态，任何开发者都可以申请接管。"
+        sub="释放后你将不再是成员，项目进入招募 Leader 状态，任何用户都可以申请接管。"
         onClose={() => setDialog(null)}
         footer={
           <>
@@ -431,7 +432,7 @@ function DemandDialog({ open, onClose, onSubmit, busy }) {
     <Modal
       open={open}
       title="发布需求"
-      sub="需求对平台上的所有开发者开放，接单后即可开始。"
+      sub="需求对平台上的所有用户开放，接单后即可开始。"
       onClose={onClose}
       footer={
         <>

@@ -28,10 +28,10 @@ export default function LoginPage() {
       .catch(() => setIdentities([]));
   }, []);
 
-  async function pick(developerId) {
+  async function pick(userId) {
     setError('');
     try {
-      await loginWithDev(developerId);
+      await loginWithDev(userId);
       navigate(target, { replace: true });
     } catch (err) {
       setError(err.message);
@@ -43,7 +43,7 @@ export default function LoginPage() {
   return (
     <div style={{ maxWidth: 480, margin: '24px auto' }}>
       <h1 className="page-title">登录</h1>
-      <p className="page-sub">使用 SSE 统一身份（UniSSO）登录。开发者身份由 SSO 的 sub 绑定，不需要额外注册。</p>
+      <p className="page-sub">使用 SSE 统一身份（UniSSO）登录。平台不保存用户资料，身份就是 SSO 的用户 id。</p>
 
       <div className="panel" style={{ marginTop: 20 }}>
         <a className="btn btn-primary" href={loginUrl} style={{ width: '100%' }}>

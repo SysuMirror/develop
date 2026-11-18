@@ -6,15 +6,17 @@ import {
   DEMAND_STATUS,
   ROLE,
   Avatar,
+  Badge,
   Empty,
   Skeleton,
   StatusBadge,
   TimeAgo,
+  displayName,
 } from '../ui.jsx';
 
-export default function DeveloperDetailPage() {
+export default function UserDetailPage() {
   const { id } = useParams();
-  const { data, loading, error } = useApi(`/developers/${id}`);
+  const { data, loading, error } = useApi(`/users/${id}`);
 
   if (loading) {
     return (
@@ -26,24 +28,27 @@ export default function DeveloperDetailPage() {
   if (error) {
     return (
       <div className="notice notice-error">
-        {error.message} · <Link to="/developers">返回开发者列表</Link>
+        {error.message} · <Link to="/users">返回用户列表</Link>
       </div>
     );
   }
 
   return (
     <div>
-      <Link className="btn-link" to="/developers">
-        ← 开发者列表
+      <Link className="btn-link" to="/users">
+        ← 用户列表
       </Link>
 
       <div className="page-head" style={{ marginTop: 10 }}>
         <div className="row" style={{ gap: 14 }}>
-          <Avatar name={data.name} src={data.avatar} size="lg" />
+          <Avatar name={displayName(data)} src={data.avatar} size="lg" />
           <div>
-            <h1 className="page-title">{data.name}</h1>
+            <div className="row" style={{ gap: 8 }}>
+              <h1 className="page-title">{displayName(data)}</h1>
+              <Badge tone={data.developer ? 'green' : 'gray'}>{data.developer ? '开发者' : '未获得开发者资格'}</Badge>
+            </div>
             <p className="page-sub" style={{ marginTop: 2 }}>
-              {data.email || '未提供邮箱'} · 加入于 <TimeAgo value={data.createdAt} />
+              {data.email || '未提供邮箱'}
             </p>
           </div>
         </div>

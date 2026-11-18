@@ -23,6 +23,14 @@ export const APPLY_TYPE = {
   participant: { label: '申请加入', tone: 'gray' },
 };
 
+// 用户实体在 UniSSO；目录里查不到的人只剩一个 id，统一显示为「未知用户」，不编造名字。
+export const UNKNOWN_USER = '未知用户';
+
+export function displayName(user) {
+  if (!user) return UNKNOWN_USER;
+  return user.name || user.username || UNKNOWN_USER;
+}
+
 export function Avatar({ name = '?', src, size }) {
   const cls = size === 'lg' ? 'avatar avatar--lg' : size === 'md' ? 'avatar avatar--md' : 'avatar';
   return (

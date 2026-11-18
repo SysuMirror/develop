@@ -4,8 +4,8 @@ import { Avatar, Skeleton } from './ui.jsx';
 import HomePage from './pages/HomePage.jsx';
 import ProjectsPage from './pages/ProjectsPage.jsx';
 import ProjectDetailPage from './pages/ProjectDetailPage.jsx';
-import DevelopersPage from './pages/DevelopersPage.jsx';
-import DeveloperDetailPage from './pages/DeveloperDetailPage.jsx';
+import UsersPage from './pages/UsersPage.jsx';
+import UserDetailPage from './pages/UserDetailPage.jsx';
 import DemandsPage from './pages/DemandsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -14,7 +14,7 @@ import NoQualificationPage from './pages/NoQualificationPage.jsx';
 const NAV = [
   { to: '/', label: '概览', end: true },
   { to: '/projects', label: '项目' },
-  { to: '/developers', label: '开发者' },
+  { to: '/users', label: '用户' },
   { to: '/demands', label: '需求' },
   { to: '/me', label: '我的' },
 ];
@@ -127,18 +127,18 @@ export default function App() {
           }
         />
         <Route
-          path="developers"
+          path="users"
           element={
             <RequireAuth>
-              <DevelopersPage />
+              <UsersPage />
             </RequireAuth>
           }
         />
         <Route
-          path="developers/:id"
+          path="users/:id"
           element={
             <RequireAuth>
-              <DeveloperDetailPage />
+              <UserDetailPage />
             </RequireAuth>
           }
         />

@@ -13,6 +13,7 @@ import {
   Skeleton,
   StatusBadge,
   TimeAgo,
+  displayName,
   useToast,
 } from '../ui.jsx';
 
@@ -55,10 +56,10 @@ export default function ProfilePage() {
         <div className="list">
           {inboxItems.map((apply) => (
             <div className="list__row" key={apply.id}>
-              <Avatar name={apply.developer.name} src={apply.developer.avatar} />
+              <Avatar name={displayName(apply.user)} src={apply.user.avatar} />
               <div className="grow">
                 <div className="truncate">
-                  {apply.developer.name} → <Link to={`/projects/${apply.project.id}`}>{apply.project.title}</Link>{' '}
+                  {displayName(apply.user)} → <Link to={`/projects/${apply.project.id}`}>{apply.project.title}</Link>{' '}
                   <StatusBadge map={APPLY_TYPE} value={apply.type} />
                   {apply.source === 'join' ? (
                     <>

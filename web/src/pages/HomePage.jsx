@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks.js';
-import { Badge, Empty, ROLE, Skeleton, StatusBadge, APPLY_STATUS, DEMAND_STATUS, TimeAgo, Avatar } from '../ui.jsx';
+import { Badge, Empty, ROLE, Skeleton, StatusBadge, APPLY_STATUS, DEMAND_STATUS, TimeAgo, Avatar, displayName } from '../ui.jsx';
 
 function Stat({ label, value, hint }) {
   return (
@@ -13,7 +13,7 @@ function Stat({ label, value, hint }) {
 }
 
 export default function HomePage() {
-  const developers = useApi('/developers?pageSize=1');
+  const users = useApi('/users?pageSize=1');
   const projects = useApi('/projects?pageSize=6');
   const inbox = useApi('/applies/inbox');
   const waitingDemands = useApi('/demands?status=waiting&pageSize=1');
@@ -38,8 +38,8 @@ export default function HomePage() {
             <p className="project-card__misc">{project.misc || '暂无项目说明'}</p>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span className="row" style={{ gap: 6 }}>
-                {project.leader ? <Avatar name={project.leader.name} src={project.leader.avatar} /> : null}
-                <span className="muted">{project.leader ? project.leader.name : '招募 leader 中'}</span>
+                {project.leader ? <Avatar name={displayName(project.leader)} src={project.leader.avatar} /> : null}
+                <span className="muted">{project.leader ? displayName(project.leader) : '招募 leader 中'}</span>
               </span>
               <span className="faint">
                 {project.memberCount} 人 · {project.waitingDemandCount} 个待接需求
@@ -62,10 +62,10 @@ export default function HomePage() {
         <div className="list">
           {inboxItems.slice(0, 5).map((apply) => (
             <div className="list__row" key={apply.id}>
-              <Avatar name={apply.developer.name} src={apply.developer.avatar} />
+              <Avatar name={displayName(apply.user)} src={apply.user.avatar} />
               <div className="grow">
                 <div className="truncate">
-                  {apply.developer.name} 申请加入 <strong>{apply.project.title}</strong>
+                  {displayName(apply.user)} 申请加入 <strong>{apply.project.title}</strong>
                 </div>
                 <div className="faint">
                   {apply.type === 'leader' ? '申请成为 leader' : '申请成为成员'} · <TimeAgo value={apply.createdAt} />
@@ -99,7 +99,7 @@ export default function HomePage() {
       </div>
 
       <div className="stat-grid">
-        <Stat label="开发者" value={developers.data?.total} hint="已登记的统一身份" />
+        <Stat label="用户" value={users.data?.total} hint="参与过项目的统一身份" />
         <Stat label="项目" value={projects.data?.total} hint="含招募中与进行中" />
         <Stat label="待审申请" value={inbox.data ? inboxItems.length : '—'} hint="等我决策的加入申请" />
         <Stat label="待接需求" value={waitingDemands.data?.total} hint="可立即接单的任务" />
@@ -133,7 +133,7 @@ export default function HomePage() {
             {waitingDemands.data?.total ?? '—'} 个待接单
           </Badge>
           <span className="muted">
-            等待接单的需求对所有开发者开放，接单后项目成员与发布者都能跟踪进度。
+            等待接单的需求对所有用户开放，接单后项目成员与发布者都能跟踪进度。
           </span>
         </div>
         <div className="row" style={{ gap: 8, marginTop: 12 }}>

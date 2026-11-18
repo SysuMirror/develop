@@ -27,8 +27,8 @@ export function AuthProvider({ children }) {
     refresh().catch(() => setLoading(false));
   }, [refresh]);
 
-  const loginWithDev = useCallback(async (developerId) => {
-    await api.post('/auth/dev-login', { developerId });
+  const loginWithDev = useCallback(async (userId) => {
+    await api.post('/auth/dev-login', { userId });
     return refresh();
   }, [refresh]);
 
