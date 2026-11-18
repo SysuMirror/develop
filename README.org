@@ -158,15 +158,21 @@ applies, demands，外加两张辅助表 sessions（登录会话）和 developer
 
 ** 用户目录
 
-本平台不存用户资料，列表里的名字、头像、邮箱全部实时从 UniSSO 目录取：
-=POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
-=SSO_CLIENT_SECRET= ）。这个接口只返回全量列表、没有分页与单查，所以缓存放在进程内：
+名字、头像、邮箱都来自 UniSSO，本平台只有一份展示缓存，不存身份。两个来源：
 
-- 惰性：启动时不预取，也没有定时刷新，只有请求真的需要名字时才拉一次；
-- =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内的请求复用同一份数据；
-- 并发请求共享同一次拉取，不会打出一串请求；
-- 拉取失败沿用上一次的结果；从来没有成功过时名字为 =null= ，前端显示「未知用户」，
-  接口带 =directoryStale: true= 提示。业务不因此失败。
+1. =POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
+   =SSO_CLIENT_SECRET= ）——一次拿全量。它要求应用在 UniSSO 侧是 =kind=internal= 且启用
+   M2M（或在 =UNISSO_PASSWORD_VERIFY_CLIENTS= 里），否则返回 =403 password_verify_forbidden= 。
+   没有分页也没有单查，所以结果缓存在进程内：惰性拉取（启动不预取、无定时刷新）、
+   =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内复用、并发请求共享同一次拉取。
+2. =user_profile= 表 —— 登录回调拿到 =userinfo= 后抄一份 =name/avatar/email= 落库
+   （=server/src/directory.js= 的 =remember()= ，写失败只记日志不影响登录）。
+
+取名顺序是：目录命中 → =user_profile= 回落 → 都没有就是 =null= ，前端显示「未知用户」，
+接口带 =directoryStale: true= 提示。业务不因此失败。列表 =/api/users= 是「目录 ∪ user_profile」，
+所以只要登录过一次，名字就一定找得到；从没登录过的人要靠目录接口有权限。
+
+只从缓存拿到资料的人 =developer= 返回 =null= （未知），页面显示「资格未知」。
 
 =DEV_LOGIN= 打开时目录换成 =server/src/demo-users.js= 里的演示身份，不访问 SSO。
 

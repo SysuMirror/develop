@@ -63,6 +63,16 @@ CREATE TABLE IF NOT EXISTS demands (
   KEY idx_demands_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 展示用资料缓存：登录回调把 userinfo 的姓名/头像/邮箱抄一份，目录接口不可用时兜底。
+-- 它不承担身份语义，谁是开发者仍由 UniSSO 决定。
+CREATE TABLE IF NOT EXISTS user_profile (
+  user_id    VARCHAR(36) NOT NULL PRIMARY KEY,
+  name       VARCHAR(128) NULL,
+  avatar     VARCHAR(512) NULL,
+  email      VARCHAR(255) NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS sessions (
   id CHAR(43) NOT NULL,
   user_id VARCHAR(36) NOT NULL,

@@ -6,6 +6,7 @@
 // 缓存策略是惰性的：启动时不预取、不做定时刷新，只有某个请求确实需要资料时才拉一次，
 // 之后在 SSO_DIRECTORY_TTL_SECONDS 内复用同一份结果。拉取失败时沿用上一次成功的结果，
 // 从未成功过就把名字留空（前端显示「未知用户」），不让页面 500。
+import { query } from './db.js';
 import { demoDirectory } from './demo-users.js';
 import { devLoginEnabled, ssoCredentials } from './sso-config.js';
 
@@ -31,6 +32,44 @@ function normalize(raw) {
     developer: raw.developer === true,
     active: raw.active !== false,
   };
+}
+
+// 落库的展示缓存：登录回调抄下来的 userinfo 快照。目录里查不到的人用它兜底，
+// developer 未知就是 null，交给前端显示「资格未知」。
+function fromProfileRow(row) {
+  return {
+    id: String(row.user_id),
+    username: null,
+    name: row.name || null,
+    avatar: row.avatar || null,
+    email: row.email || null,
+    developer: null,
+    active: true,
+    cached: true,
+  };
+}
+
+async function readProfiles(ids) {
+  const wanted = [...new Set((ids || []).filter(Boolean).map(String))];
+  if (wanted.length === 0) return new Map();
+  const rows = await query(
+    `SELECT user_id, name, avatar, email FROM user_profile
+      WHERE user_id IN (${wanted.map(() => '?').join(',')})`,
+    wanted,
+  );
+  return new Map(rows.map((row) => [String(row.user_id), fromProfileRow(row)]));
+}
+
+async function saveProfile(user) {
+  try {
+    await query(
+      `INSERT INTO user_profile (user_id, name, avatar, email) VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE name = VALUES(name), avatar = VALUES(avatar), email = VALUES(email)`,
+      [user.id, user.name, user.avatar, user.email],
+    );
+  } catch (error) {
+    console.error('[directory] user_profile 写入失败：', error.message);
+  }
 }
 
 async function fetchDirectory() {
@@ -97,7 +136,7 @@ export async function snapshot() {
 
 // 登录回调已经拿到了权威的 userinfo：先塞进缓存。这样即使 users/list 不可用，
 // 当前用户自己也总有名字可显示（别人仍然可能是「未知用户」）。
-export function remember(raw) {
+export async function remember(raw) {
   const user = normalize(raw ?? {});
   if (!user.id) return;
   const users = new Map(cached?.users ?? []);
@@ -111,22 +150,44 @@ export function remember(raw) {
     email: user.email ?? previous?.email ?? null,
   });
   cached = { users, fetchedAt: cached?.fetchedAt ?? 0 };
+  await saveProfile(users.get(user.id));
+}
+
+// 目录里没有的人从 user_profile 落库缓存补。表很小（每个登录过的人一行），
+// 一次全取比逐 id 拼 SQL 简单；目录可用时也没必要按 id 过滤。
+async function readCachedProfiles(directory) {
+  try {
+    const rows = await query('SELECT user_id, name, avatar, email FROM user_profile');
+    return rows
+      .filter((row) => !directory.has(String(row.user_id)))
+      .map(fromProfileRow);
+  } catch (error) {
+    console.error('[directory] user_profile 读取失败：', error.message);
+    return [];
+  }
 }
 
 export async function getUser(id) {
   if (!id) return null;
-  const { users } = await snapshot();
+  const users = await getUsers([id]);
   return users.get(String(id)) ?? null;
 }
 
+// 目录优先，user_profile 补缺；两者都没有就是查无此人。
 export async function getUsers(ids) {
   const wanted = [...new Set((ids || []).filter(Boolean).map(String))];
   const found = new Map();
   if (wanted.length === 0) return found;
-  const { users } = await snapshot();
+  const { users: directory } = await snapshot();
+  const missing = [];
   for (const id of wanted) {
-    const user = users.get(id);
+    const user = directory.get(id);
     if (user) found.set(id, user);
+    else missing.push(id);
+  }
+  if (missing.length > 0) {
+    const cached = await readProfiles(missing);
+    for (const [id, user] of cached) found.set(id, user);
   }
   return found;
 }
@@ -135,16 +196,18 @@ export async function getUsers(ids) {
 export async function lookup(id) {
   const key = String(id ?? '').trim();
   if (!key) return { known: false, user: null };
-  const { users, stale } = await snapshot();
-  const user = users.get(key) ?? null;
+  const { users: directory, stale } = await snapshot();
+  const user = directory.get(key) ?? (await readProfiles([key])).get(key) ?? null;
   if (user) return { known: true, user };
   return { known: stale ? null : false, user: null };
 }
 
 export async function searchUsers({ q = '', page = 1, pageSize = 20 } = {}) {
-  const { users, stale } = await snapshot();
+  const { users: directory, stale } = await snapshot();
+  // 目录 ∪ user_profile：登录过但目录查不到的人（或目录完全不可用时）靠缓存显示名字。
+  const cached = await readCachedProfiles(directory);
   const term = String(q).trim().toLowerCase();
-  let list = [...users.values()].filter((user) => user.active !== false);
+  let list = [...directory.values(), ...cached].filter((user) => user.active !== false);
   if (term) {
     list = list.filter((user) =>
       [user.name, user.username, user.email, user.id].some((value) =>
