@@ -14,6 +14,9 @@ import {
   displayName,
 } from '../ui.jsx';
 
+// developer 为 null 说明资料只来自缓存，UniSSO 的资格字段还没拿到。
+const QUALIFICATION_LABEL = { true: '开发者', false: '未获得开发者资格', null: '资格未知' };
+
 export default function UserDetailPage() {
   const { id } = useParams();
   const { data, loading, error } = useApi(`/users/${id}`);
@@ -45,7 +48,7 @@ export default function UserDetailPage() {
           <div>
             <div className="row" style={{ gap: 8 }}>
               <h1 className="page-title">{displayName(data)}</h1>
-              <Badge tone={data.developer ? 'green' : 'gray'}>{data.developer ? '开发者' : '未获得开发者资格'}</Badge>
+              <Badge tone={data.developer ? 'green' : 'gray'}>{QUALIFICATION_LABEL[data.developer]}</Badge>
             </div>
             <p className="page-sub" style={{ marginTop: 2 }}>
               {data.email || '未提供邮箱'}
