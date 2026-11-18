@@ -9,7 +9,7 @@ import { pool } from './db.js';
 import { startQualSyncWorker } from './qual-sync.js';
 import appliesRouter from './routes/applies.js';
 import demandsRouter from './routes/demands.js';
-import developersRouter from './routes/developers.js';
+import usersRouter from './routes/users.js';
 import joinRouter from './routes/join.js';
 import projectsRouter from './routes/projects.js';
 
@@ -56,7 +56,7 @@ export function createApp() {
   app.use('/api', auth.requireUser);
   // 开发者业务要求 UniSSO userinfo 的 developer 严格为 true（DEV_LOGIN 会话除外）。
   app.use('/api', wrap(auth.requireDeveloper));
-  app.use('/api', developersRouter);
+  app.use('/api', usersRouter);
   app.use('/api', projectsRouter);
   app.use('/api', appliesRouter);
   app.use('/api', demandsRouter);

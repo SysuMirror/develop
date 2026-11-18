@@ -1,81 +1,84 @@
 import { Router } from 'express';
+import { getUsers, searchUsers, userRef } from '../directory.js';
 import { query } from '../db.js';
-import { likeTerm, parsePaging, wrap } from '../http.js';
+import { notFound, parsePaging, wrap } from '../http.js';
 
 const router = Router();
 
+// 用户列表：目录（UniSSO users 表）负责资料与搜索，本库只补项目参与度。
 router.get(
-  '/developers',
+  '/users',
   wrap(async (req, res) => {
-    const { page, pageSize, offset } = parsePaging(req);
-    const term = likeTerm(req.query.q);
-    const where = term ? 'WHERE d.name LIKE ?' : '';
-    const params = term ? [term] : [];
-    const items = await query(
-      `SELECT d.id, d.name, d.avatar,
-              (SELECT COUNT(*) FROM project_member m WHERE m.developer_id = d.id) AS project_count,
-              (SELECT COUNT(*) FROM project_member m WHERE m.developer_id = d.id AND m.role = 'leader') AS lead_count
-         FROM developers d
-         ${where}
-        ORDER BY d.id
-        LIMIT ? OFFSET ?`,
-      [...params, pageSize, offset],
-    );
-    const [{ total }] = await query(`SELECT COUNT(*) AS total FROM developers d ${where}`, params);
+    const { page, pageSize } = parsePaging(req);
+    const { items, total, stale } = await searchUsers({ q: req.query.q, page, pageSize });
+    const ids = items.map((user) => user.id);
+    const counts =
+      ids.length > 0
+        ? await query(
+            `SELECT user_id, COUNT(*) AS n, SUM(role = 'leader') AS leads
+               FROM project_member
+              WHERE user_id IN (${ids.map(() => '?').join(',')})
+              GROUP BY user_id`,
+            ids,
+          )
+        : [];
+    const byId = new Map(counts.map((row) => [row.user_id, row]));
     res.json({
-      items: items.map((row) => ({
-        id: row.id,
-        name: row.name,
-        avatar: row.avatar,
-        projectCount: Number(row.project_count),
-        leadCount: Number(row.lead_count),
-      })),
-      total: Number(total),
+      items: items.map((user) => {
+        const stat = byId.get(user.id);
+        return {
+          ...userRef(user.id, user),
+          projectCount: Number(stat?.n ?? 0),
+          leadCount: Number(stat?.leads ?? 0),
+        };
+      }),
+      total,
       page,
       pageSize,
+      directoryStale: stale,
     });
   }),
 );
 
+// 用户详情：资料来自目录，项目 / 申请 / 需求来自本库。
 router.get(
-  '/developers/:id',
+  '/users/:id',
   wrap(async (req, res) => {
-    const id = Number(req.params.id);
-    const developer = await query('SELECT id, name, avatar, email, created_at FROM developers WHERE id = ?', [id]);
-    if (developer.length === 0) {
-      res.status(404).json({ error: { code: 'NOT_FOUND', message: '开发者不存在' } });
-      return;
+    const id = String(req.params.id);
+    const [profiles, projects, applies, demands] = await Promise.all([
+      getUsers([id]),
+      query(
+        `SELECT p.id, p.title, m.role, m.created_at
+           FROM project_member m JOIN projects p ON p.id = m.project_id
+          WHERE m.user_id = ?
+          ORDER BY m.created_at DESC`,
+        [id],
+      ),
+      query(
+        `SELECT a.id, a.type, a.status, a.created_at, p.id AS project_id, p.title AS project_title
+           FROM applies a JOIN projects p ON p.id = a.project_id
+          WHERE a.user_id = ?
+          ORDER BY a.created_at DESC
+          LIMIT 20`,
+        [id],
+      ),
+      query(
+        `SELECT d.id, d.title, d.status, d.created_at, p.id AS project_id, p.title AS project_title
+           FROM demands d JOIN projects p ON p.id = d.project_id
+          WHERE d.user_id = ?
+          ORDER BY d.created_at DESC
+          LIMIT 20`,
+        [id],
+      ),
+    ]);
+    const profile = profiles.get(id);
+    if (!profile && projects.length === 0 && applies.length === 0 && demands.length === 0) {
+      throw notFound('用户不存在');
     }
-    const profiles = developer[0];
-    const projects = await query(
-      `SELECT p.id, p.title, m.role, m.created_at
-         FROM project_member m JOIN projects p ON p.id = m.project_id
-        WHERE m.developer_id = ?
-        ORDER BY m.created_at DESC`,
-      [id],
-    );
-    const applies = await query(
-      `SELECT a.id, a.type, a.status, a.created_at, p.id AS project_id, p.title AS project_title
-         FROM applies a JOIN projects p ON p.id = a.project_id
-        WHERE a.developer_id = ?
-        ORDER BY a.created_at DESC
-        LIMIT 20`,
-      [id],
-    );
-    const demands = await query(
-      `SELECT d.id, d.title, d.status, d.created_at, p.id AS project_id, p.title AS project_title
-         FROM demands d JOIN projects p ON p.id = d.project_id
-        WHERE d.developer_id = ?
-        ORDER BY d.created_at DESC
-        LIMIT 20`,
-      [id],
-    );
     res.json({
-      id: profiles.id,
-      name: profiles.name,
-      avatar: profiles.avatar,
-      email: profiles.email,
-      createdAt: profiles.created_at,
+      ...userRef(id, profile),
+      email: profile?.email ?? null,
+      developer: profile?.developer ?? null,
       projects: projects.map((row) => ({
         projectId: row.id,
         title: row.title,
