@@ -51,8 +51,11 @@ export function createApp(): express.Express {
     }),
   );
 
+  // 跳转授权入口（GET）；external 应用不支持邮箱密码登录，故没有 POST 版本。
   app.get('/api/auth/login', wrap(auth.login));
-  app.post('/api/auth/login', wrap(auth.passwordLogin));
+  app.all('/api/auth/login', (_req, res) => {
+    res.status(405).json({ error: { code: 'METHOD_NOT_ALLOWED', message: '登录只支持 GET 跳转授权' } });
+  });
   app.get('/api/auth/callback', wrap(auth.callback));
   app.get('/api/auth/me', wrap(auth.me));
   app.post('/api/auth/logout', wrap(auth.logout));

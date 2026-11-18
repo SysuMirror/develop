@@ -8,7 +8,6 @@ export interface AuthValue {
   loading: boolean;
   refresh: () => Promise<Me | null>;
   loginWithDev: (userId: string) => Promise<Me | null>;
-  loginWithPassword: (email: string, password: string) => Promise<Me | null>;
   logout: () => Promise<void>;
   loginUrl: string;
 }
@@ -47,14 +46,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [refresh],
   );
 
-  const loginWithPassword = useCallback(
-    async (email: string, password: string): Promise<Me | null> => {
-      await api.post('/auth/login', { email, password });
-      return refresh();
-    },
-    [refresh],
-  );
-
   const logout = useCallback(async () => {
     await api.post('/auth/logout');
     setUser(null);
@@ -66,8 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, refresh, loginWithDev, loginWithPassword, logout, loginUrl }),
-    [user, loading, refresh, loginWithDev, loginWithPassword, logout, loginUrl],
+    () => ({ user, loading, refresh, loginWithDev, logout, loginUrl }),
+    [user, loading, refresh, loginWithDev, logout, loginUrl],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { FormEvent } from 'react';
-import { api, messageOf } from '../api';
+import { api } from '../api';
 import { useAuth } from '../auth';
-import { Avatar, Field, Skeleton } from '../ui';
+import { Avatar, Skeleton } from '../ui';
 import type { DevIdentity } from '../types';
 
 function safeTarget(value: string | null): string {
@@ -11,15 +10,28 @@ function safeTarget(value: string | null): string {
   return value;
 }
 
+// 回调失败时后端把错误码放在 /login?error=…；这里翻成人话。
+const CALLBACK_ERRORS: Record<string, string> = {
+  access_denied: '你在授权页取消了授权',
+  state_mismatch: '登录状态校验失败，请重新发起登录',
+  missing_code: '统一身份没有带回授权码，请重试',
+  SSO_CODE_INVALID: '授权码已失效，请重新登录',
+  SSO_CLIENT_REJECTED: '身份服务未接受本应用凭证，请联系管理员',
+  SSO_TOKEN_FAILED: '换取登录凭证失败，请重试',
+  SSO_UNAVAILABLE: '身份服务暂时不可用，请稍后重试',
+  SSO_BAD_PROFILE: '统一身份返回的用户信息不完整',
+};
+
 export default function LoginPage() {
-  const { user, loading, loginWithDev, loginWithPassword, loginUrl } = useAuth();
+  const { user, loading, loginWithDev, loginUrl } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [identities, setIdentities] = useState<DevIdentity[] | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => {
+    const code = params.get('error');
+    if (!code) return '';
+    return CALLBACK_ERRORS[code] || `登录失败（${code}）`;
+  });
   const target = safeTarget(params.get('redirect'));
 
   useEffect(() => {
@@ -33,27 +45,13 @@ export default function LoginPage() {
       .catch(() => setIdentities([]));
   }, []);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError('');
-    setBusy(true);
-    try {
-      await loginWithPassword(email.trim(), password);
-      navigate(target, { replace: true });
-    } catch (err) {
-      setError(messageOf(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function pick(userId: string) {
     setError('');
     try {
       await loginWithDev(userId);
       navigate(target, { replace: true });
     } catch (err) {
-      setError(messageOf(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -63,47 +61,14 @@ export default function LoginPage() {
     <div style={{ maxWidth: 480, margin: '24px auto' }}>
       <h1 className="page-title">登录</h1>
       <p className="page-sub">
-        使用 SSE 统一身份的邮箱和密码登录；也可以走授权跳转。平台不保存用户资料，身份就是 SSO 的用户 id。
+        使用 SSE 统一身份授权登录。平台不保存用户资料，身份就是 SSO 的用户 id。
       </p>
 
       <div className="panel" style={{ marginTop: 20 }}>
-        <form onSubmit={submit}>
-          <Field label="邮箱">
-            <input
-              className="input"
-              type="email"
-              name="email"
-              autoComplete="username"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="name@example.com"
-              required
-            />
-          </Field>
-          <Field label="密码">
-            <input
-              className="input"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="UniSSO 密码"
-              required
-            />
-          </Field>
-          <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%' }}>
-            {busy ? '登录中…' : '登录'}
-          </button>
-        </form>
-        {error ? <div className="notice notice-error" style={{ marginTop: 12 }}>{error}</div> : null}
-
-        <div className="faint" style={{ textAlign: 'center', margin: '18px 0 10px' }}>
-          或
-        </div>
-        <a className="btn btn-secondary" href={loginUrl} style={{ width: '100%' }}>
+        <a className="btn btn-primary" href={loginUrl} style={{ width: '100%' }}>
           使用 SSE 统一身份授权登录
         </a>
+        {error ? <div className="notice notice-error" style={{ marginTop: 12 }}>{error}</div> : null}
 
         {identities && identities.length > 0 ? (
           <>
@@ -125,11 +90,7 @@ export default function LoginPage() {
               </button>
             ))}
           </>
-        ) : (
-          <p className="faint" style={{ marginTop: 14 }}>
-            开发身份模拟未开启：请先在 server/.env 配置 SSO_CLIENT_ID / SSO_CLIENT_SECRET。
-          </p>
-        )}
+        ) : null}
       </div>
     </div>
   );

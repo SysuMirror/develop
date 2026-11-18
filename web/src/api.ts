@@ -15,16 +15,16 @@ export class ApiError extends Error {
   }
 }
 
-// 与 server/src/auth.js 的错误码保持一致，给用户可操作的文案。
+// 与 server/src/auth.ts 的错误码保持一致，给用户可操作的文案。
 const ERROR_TEXT: Record<string, string> = {
   NOT_DEVELOPER: '尚未获得开发者资格',
-  INVALID_CREDENTIALS: '邮箱或密码错误',
-  PASSWORD_LOGIN_FORBIDDEN: '该应用未开启邮箱密码登录',
-  TOO_MANY_ATTEMPTS: '尝试过于频繁，请稍后再试',
   SSO_NOT_CONFIGURED: '未配置统一身份凭证',
   SSO_SESSION_EXPIRED: '登录已过期，请重新登录',
   SSO_TOKEN_REJECTED: '登录已过期，请重新登录',
+  SSO_CODE_INVALID: '授权码已失效，请重新登录',
+  SSO_CLIENT_REJECTED: '身份服务未接受本应用凭证，请联系管理员',
   SSO_UNAVAILABLE: '身份服务暂时不可用，请稍后重试',
+  SSO_TOKEN_FAILED: '换取登录凭证失败，请重试',
   SSO_USERINFO_FAILED: '身份服务暂时不可用，请稍后重试',
   SSO_BAD_PROFILE: '统一身份返回的用户信息不完整',
 };
