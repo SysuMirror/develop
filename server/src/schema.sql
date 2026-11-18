@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS user_profile (
 CREATE TABLE IF NOT EXISTS sessions (
   id CHAR(43) NOT NULL,
   user_id VARCHAR(36) NOT NULL,
+  auth_method VARCHAR(16) NOT NULL DEFAULT 'sso',
+  developer TINYINT(1) NULL,
   access_token TEXT NULL,
   access_token_expires_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

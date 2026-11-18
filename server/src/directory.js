@@ -8,7 +8,7 @@
 // 从未成功过就把名字留空（前端显示「未知用户」），不让页面 500。
 import { query } from './db.js';
 import { demoDirectory } from './demo-users.js';
-import { devLoginEnabled, ssoCredentials } from './sso-config.js';
+import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.js';
 
 const REQUEST_TIMEOUT_MS = 5000;
 
@@ -99,9 +99,10 @@ async function fetchDirectory() {
 }
 
 async function load() {
-  if (devLoginEnabled()) {
-    // 本地联调不查 SSO，用写死的演示用户，保证页面有名字。
-    return new Map(demoDirectory().map((user) => [user.id, user]));
+  if (!ssoConfigured()) {
+    // 没有真实目录可查：DEV_LOGIN 的演示身份由 withDemo() 合并，否则让 snapshot() 走降级。
+    if (devLoginEnabled()) return new Map();
+    throw new Error('未配置 SSO_ISSUER / SSO_CLIENT_ID / SSO_CLIENT_SECRET');
   }
   if (cached && Date.now() - cached.fetchedAt < ttlMs()) return cached.users;
   if (inflight) return inflight;
@@ -120,17 +121,25 @@ async function load() {
   return inflight;
 }
 
+// DEV_LOGIN 只叠加演示身份；配置了 SSO 时仍然拉真实目录，密码登录的资格刷新依赖它。
+function withDemo(users) {
+  if (!devLoginEnabled()) return users;
+  const merged = new Map(demoDirectory().map((user) => [user.id, user]));
+  for (const [id, user] of users) merged.set(id, user);
+  return merged;
+}
+
 // 取目录快照，永不抛错：失败时 stale=true，名字交给调用方降级。
 export async function snapshot() {
   try {
-    return { users: await load(), stale: false };
+    return { users: withDemo(await load()), stale: false };
   } catch (error) {
     // 连续失败只在第一次打日志，否则每个请求都会刷一行。
     if (!loggedFailure) {
       loggedFailure = true;
       console.error('[directory] 用户目录拉取失败，展示降级为「未知用户」：', error.message);
     }
-    return { users: cached?.users ?? new Map(), stale: true };
+    return { users: withDemo(cached?.users ?? new Map()), stale: true };
   }
 }
 

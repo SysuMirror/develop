@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import { one, query } from './db.js';
 import { DEMO_USERS } from './demo-users.js';
-import { getUser, remember } from './directory.js';
+import { getUser, lookup, remember } from './directory.js';
 import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.js';
+import { verifyPassword } from './unisso-password.js';
 import {
   ApiError,
   badRequest,
@@ -22,6 +23,8 @@ const SESSION_COOKIE = 'sid';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
 const TX_COOKIE = 'oauth_tx';
 const TX_MAX_AGE = 600;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_PASSWORD_LENGTH = 1024;
 
 export { devLoginEnabled, ssoConfigured };
 
@@ -66,14 +69,26 @@ function toMysqlDate(date) {
 }
 
 // 会话只记 sub（= UniSSO users.id）；昵称头像不落库，展示时再向目录要。
-export async function createSession(userId, { accessToken = null, expiresIn = 0 } = {}) {
+// auth_method 区分 sso / password / dev，checkQualification 据此选择资格来源。
+export async function createSession(
+  userId,
+  { accessToken = null, expiresIn = 0, authMethod = 'sso', developer = null } = {},
+) {
   const id = b64url(crypto.randomBytes(32));
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
   const tokenExpiresAt = accessToken && expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null;
   await query(
-    `INSERT INTO sessions (id, user_id, access_token, access_token_expires_at, expires_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [id, userId, accessToken, tokenExpiresAt ? toMysqlDate(tokenExpiresAt) : null, toMysqlDate(expires)],
+    `INSERT INTO sessions (id, user_id, auth_method, developer, access_token, access_token_expires_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      userId,
+      authMethod,
+      developer === null ? null : developer ? 1 : 0,
+      accessToken,
+      tokenExpiresAt ? toMysqlDate(tokenExpiresAt) : null,
+      toMysqlDate(expires),
+    ],
   );
   return { id, expires };
 }
@@ -102,7 +117,7 @@ export const attachSession = (req, _res, next) => {
     return next();
   }
   one(
-    `SELECT id AS session_id, user_id, expires_at, access_token, access_token_expires_at
+    `SELECT id AS session_id, user_id, auth_method, developer, expires_at, access_token, access_token_expires_at
        FROM sessions
       WHERE id = ? AND expires_at > NOW()`,
     [raw],
@@ -120,6 +135,8 @@ export const attachSession = (req, _res, next) => {
         avatar: profile?.avatar ?? null,
         email: profile?.email ?? null,
         sessionId: row.session_id,
+        authMethod: row.auth_method || 'sso',
+        developer: row.developer === null || row.developer === undefined ? null : Boolean(row.developer),
         accessToken: row.access_token || null,
         accessTokenExpiresAt: row.access_token_expires_at || null,
       };
@@ -162,6 +179,62 @@ export const login = (req, res) => {
   redirectSafe(req, res, `${ISSUER}/authorize?${params.toString()}`, { allowedOrigins: [ISSUER] });
 };
 
+// 邮箱密码登录：不跳 UniSSO，后端直接校验并签发本地会话。
+export const passwordLogin = async (req, res) => {
+  const email = String(req.body?.email ?? '').trim();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!EMAIL_RE.test(email)) throw badRequest('BAD_REQUEST', '请输入有效的邮箱地址');
+  if (!password) throw badRequest('BAD_REQUEST', '请输入密码');
+  if (password.length > MAX_PASSWORD_LENGTH) throw badRequest('BAD_REQUEST', '密码过长');
+  if (!ssoConfigured()) {
+    throw new ApiError(503, 'SSO_NOT_CONFIGURED', '未配置 UniSSO 凭证，无法使用邮箱密码登录');
+  }
+
+  let result;
+  try {
+    result = await verifyPassword(email, password);
+  } catch (error) {
+    console.error('[auth] password/verify 请求失败：', error.message);
+    throw new ApiError(502, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
+  }
+
+  if (!result.ok || !result.user) {
+    const code = String(result.data?.error || '');
+    const detail = result.data?.error_description || result.data?.message || '';
+    if (result.status === 401 || code === 'invalid_credentials') {
+      throw new ApiError(401, 'INVALID_CREDENTIALS', '邮箱或密码错误');
+    }
+    if (result.status === 403 || code === 'password_verify_forbidden') {
+      throw new ApiError(403, 'PASSWORD_LOGIN_FORBIDDEN', '该应用未开启邮箱密码登录');
+    }
+    if (result.status === 429 || code === 'rate_limited' || code === 'too_many_attempts') {
+      throw new ApiError(429, 'TOO_MANY_ATTEMPTS', '尝试过于频繁，请稍后再试');
+    }
+    if (result.status === 400) {
+      throw new ApiError(400, 'BAD_REQUEST', detail || '登录信息有误');
+    }
+    console.error('[auth] password/verify 返回异常：', result.status, code, detail);
+    throw new ApiError(502, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
+  }
+
+  const user = result.user;
+  // 展示资料先写缓存；即使 users/list 不可用，当前用户也总有名字可显示。
+  await remember({
+    sub: user.sub,
+    preferred_username: user.username,
+    name: user.name,
+    picture: user.picture,
+    email: user.email,
+    developer: user.developer,
+  });
+  const session = await createSession(user.sub, {
+    authMethod: 'password',
+    developer: user.developer,
+  });
+  res.setHeader('Set-Cookie', sessionCookie(req, session.id, session.expires));
+  res.json({ ok: true });
+};
+
 async function exchangeCode(code, verifier, uri) {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
@@ -193,9 +266,59 @@ async function fetchUserinfo(accessToken) {
   return data;
 }
 
+// 密码会话没有 access token：登录时先记 developer 快照，之后用 users/list 刷新。
+// 目录不可用（known === null）或只有 user_profile 快照时，回落到登录时的值。
+async function resolvePasswordQualification(user) {
+  const { known, user: fresh } = await lookup(user.id);
+  if (known === false) return false;
+  if (known === true && typeof fresh?.developer === 'boolean') return fresh.developer;
+  return user.developer === true;
+}
+
+async function checkPasswordQualification(user, ttl) {
+  if (ttl > 0) {
+    const hit = qualificationCache.get(user.sessionId);
+    if (hit && hit.expiresAt > Date.now()) return hit.developer;
+    if (hit) qualificationCache.delete(user.sessionId);
+  }
+  const pending = qualificationInFlight.get(user.sessionId);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    const developer = await resolvePasswordQualification(user);
+    if (developer !== user.developer) {
+      user.developer = developer;
+      try {
+        await query('UPDATE sessions SET developer = ? WHERE id = ?', [
+          developer ? 1 : 0,
+          user.sessionId,
+        ]);
+      } catch (error) {
+        console.error('[auth] 更新会话开发者资格失败：', error.message);
+      }
+    }
+    if (ttl > 0) {
+      qualificationCache.set(user.sessionId, { developer, expiresAt: Date.now() + ttl });
+      pruneQualificationCache();
+    }
+    return developer;
+  })();
+
+  qualificationInFlight.set(user.sessionId, promise);
+  try {
+    return await promise;
+  } finally {
+    if (qualificationInFlight.get(user.sessionId) === promise) {
+      qualificationInFlight.delete(user.sessionId);
+    }
+  }
+}
+
 // developer 只认严格布尔 true；字段缺失（线上 SSO 未部署新版本）一律视为无资格。
 export async function checkQualification(user) {
   if (!user) throw unauthorized();
+  // 密码会话没有 access token，资格来自登录快照 + users/list 定期刷新。
+  if (user.authMethod === 'password') return checkPasswordQualification(user, developerTtlMs());
   // DEV_LOGIN 造的会话没有 SSO token，仅本地联调放行。
   if (!user.accessToken) return devLoginEnabled();
 
@@ -329,7 +452,7 @@ export const devLogin = async (req, res) => {
   const userId = String(req.body?.userId ?? req.body?.developerId ?? '').trim();
   if (!userId) throw badRequest('BAD_REQUEST', '缺少 userId');
   if (!DEMO_USERS.some((user) => user.id === userId)) throw new ApiError(404, 'NOT_FOUND', '开发者不存在');
-  const session = await createSession(userId);
+  const session = await createSession(userId, { authMethod: 'dev' });
   res.setHeader('Set-Cookie', sessionCookie(req, session.id, session.expires));
   res.json({ ok: true });
 };

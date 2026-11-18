@@ -39,6 +39,12 @@ async function migrate() {
     'access_token_expires_at',
     'access_token_expires_at DATETIME NULL AFTER access_token',
   );
+  await ensureColumn(
+    'sessions',
+    'auth_method',
+    "auth_method VARCHAR(16) NOT NULL DEFAULT 'sso' AFTER user_id",
+  );
+  await ensureColumn('sessions', 'developer', 'developer TINYINT(1) NULL AFTER auth_method');
   console.log(`schema ok (${statements.length} statements)`);
 }
 

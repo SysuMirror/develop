@@ -44,6 +44,7 @@ export function createApp() {
   });
 
   app.get('/api/auth/login', wrap(auth.login));
+  app.post('/api/auth/login', wrap(auth.passwordLogin));
   app.get('/api/auth/callback', wrap(auth.callback));
   app.get('/api/auth/me', wrap(auth.me));
   app.post('/api/auth/logout', wrap(auth.logout));
