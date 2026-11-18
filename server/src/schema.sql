@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   auth_method VARCHAR(16) NOT NULL DEFAULT 'sso',
   developer TINYINT(1) NULL,
   access_token TEXT NULL,
+  refresh_token TEXT NULL,
   access_token_expires_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME NOT NULL,

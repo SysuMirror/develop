@@ -40,6 +40,8 @@ async function migrate(): Promise<void> {
     "ALTER TABLE applies ADD COLUMN source ENUM('web','join') NOT NULL DEFAULT 'web' AFTER resume_url",
   );
   await ensureColumn('sessions', 'access_token', 'ALTER TABLE sessions ADD COLUMN access_token TEXT NULL AFTER user_id');
+  // external 应用的 access token 只有 1 小时，靠 refresh_token 续期。
+  await ensureColumn('sessions', 'refresh_token', 'ALTER TABLE sessions ADD COLUMN refresh_token TEXT NULL AFTER access_token');
   await ensureColumn(
     'sessions',
     'access_token_expires_at',

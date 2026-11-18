@@ -6,7 +6,7 @@ export type ApplyType = 'leader' | 'participant';
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type ApplySource = 'web' | 'join';
 export type DemandStatus = 'waiting' | 'accepted' | 'completed';
-export type AuthMethod = 'sso' | 'password' | 'dev';
+export type AuthMethod = 'sso' | 'dev';
 
 /** attachSession 解析出来的会话用户；名字头像来自 UniSSO 目录，取不到时为 null。 */
 export interface SessionUser {
@@ -18,6 +18,7 @@ export interface SessionUser {
   authMethod: AuthMethod;
   developer: boolean | null;
   accessToken: string | null;
+  refreshToken: string | null;
   accessTokenExpiresAt: Date | string | null;
 }
 
@@ -113,5 +114,6 @@ export interface SessionRow {
   developer: number | boolean | null;
   expires_at: Date;
   access_token: string | null;
+  refresh_token: string | null;
   access_token_expires_at: Date | null;
 }
