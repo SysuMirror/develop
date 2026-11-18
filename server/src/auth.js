@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { one, query } from './db.js';
 import { DEMO_USERS } from './demo-users.js';
-import { getUser } from './directory.js';
+import { getUser, remember } from './directory.js';
 import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.js';
 import {
   ApiError,
@@ -270,6 +270,15 @@ export const callback = async (req, res) => {
     const profile = await fetchUserinfo(token.access_token);
     const userId = profile.sso_sub || profile.sub;
     if (!userId) throw new ApiError(502, 'SSO_BAD_PROFILE', 'SSO 未返回 sub');
+    // userinfo 是当前用户最新的资料，顺手塞进目录缓存（users/list 不可用时也有名字）。
+    remember({
+      sub: userId,
+      preferred_username: profile.preferred_username,
+      name: profile.name,
+      picture: profile.picture,
+      email: profile.email,
+      developer: profile.developer === true,
+    });
     const session = await createSession(userId, {
       accessToken: token.access_token,
       expiresIn: Number(token.expires_in) || 3600,

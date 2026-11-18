@@ -13,7 +13,7 @@ const REQUEST_TIMEOUT_MS = 5000;
 
 let cached = null; // { users: Map<string, user>, fetchedAt: number }
 let inflight = null;
-let lastError = null;
+let loggedFailure = false;
 
 function ttlMs() {
   const seconds = Number(process.env.SSO_DIRECTORY_TTL_SECONDS ?? 60);
@@ -69,11 +69,10 @@ async function load() {
   inflight = fetchDirectory()
     .then((users) => {
       cached = { users, fetchedAt: Date.now() };
-      lastError = null;
+      loggedFailure = false;
       return users;
     })
     .catch((error) => {
-      lastError = error;
       throw error;
     })
     .finally(() => {
@@ -87,11 +86,31 @@ export async function snapshot() {
   try {
     return { users: await load(), stale: false };
   } catch (error) {
-    if (lastError === error) {
+    // 连续失败只在第一次打日志，否则每个请求都会刷一行。
+    if (!loggedFailure) {
+      loggedFailure = true;
       console.error('[directory] 用户目录拉取失败，展示降级为「未知用户」：', error.message);
     }
     return { users: cached?.users ?? new Map(), stale: true };
   }
+}
+
+// 登录回调已经拿到了权威的 userinfo：先塞进缓存。这样即使 users/list 不可用，
+// 当前用户自己也总有名字可显示（别人仍然可能是「未知用户」）。
+export function remember(raw) {
+  const user = normalize(raw ?? {});
+  if (!user.id) return;
+  const users = new Map(cached?.users ?? []);
+  const previous = users.get(user.id);
+  users.set(user.id, {
+    ...previous,
+    ...user,
+    username: user.username ?? previous?.username ?? null,
+    name: user.name ?? previous?.name ?? null,
+    avatar: user.avatar ?? previous?.avatar ?? null,
+    email: user.email ?? previous?.email ?? null,
+  });
+  cached = { users, fetchedAt: cached?.fetchedAt ?? 0 };
 }
 
 export async function getUser(id) {
