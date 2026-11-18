@@ -10,7 +10,8 @@
     "dev": "node --watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "migrate": "node src/migrate.ts",
-    "seed": "SEED=1 node src/migrate.ts"
+    "seed": "SEED=1 node src/migrate.ts",
+    "check:sso": "node src/sso-check.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
