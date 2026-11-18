@@ -258,7 +258,7 @@ export default function ProjectDetailPage() {
                   <div className="truncate">{demand.title}</div>
                   <div className="faint">
                     <StatusBadge map={DEMAND_STATUS} value={demand.status} />
-                    {demand.assignee ? ` · 由 ${demand.assignee.name} 接单` : ' · 等待接单'} · <TimeAgo value={demand.createdAt} />
+                    {demand.assignee ? ` · 由 ${displayName(demand.assignee)} 接单` : ' · 等待接单'} · <TimeAgo value={demand.createdAt} />
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6 }}>

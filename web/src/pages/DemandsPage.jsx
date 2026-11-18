@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, qs } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useApi, useDebounced } from '../hooks.js';
-import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, useToast } from '../ui.jsx';
+import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName, useToast } from '../ui.jsx';
 
 const TABS = [
   { key: '', label: '全部' },
@@ -73,7 +73,7 @@ export default function DemandsPage() {
                   <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
                 </td>
                 <td>{demand.creator?.name || <span className="faint">—</span>}</td>
-                <td>{demand.assignee ? demand.assignee.name : <span className="faint">—</span>}</td>
+                <td>{demand.assignee ? displayName(demand.assignee) : <span className="faint">—</span>}</td>
                 <td>
                   <StatusBadge map={DEMAND_STATUS} value={demand.status} />
                   <div className="faint">

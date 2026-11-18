@@ -1,6 +1,6 @@
 import { NavLink, Outlet, Route, Routes, Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './auth.jsx';
-import { Avatar, Skeleton } from './ui.jsx';
+import { Avatar, Skeleton, displayName } from './ui.jsx';
 import HomePage from './pages/HomePage.jsx';
 import ProjectsPage from './pages/ProjectsPage.jsx';
 import ProjectDetailPage from './pages/ProjectDetailPage.jsx';
@@ -38,8 +38,8 @@ function Header() {
         {user ? (
           <div className="row" style={{ gap: 6 }}>
             <Link className="user-chip" to="/me">
-              <Avatar name={user.name} src={user.avatar} />
-              {user.name}
+              <Avatar name={displayName(user)} src={user.avatar} />
+              {displayName(user)}
             </Link>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => logout()}>
               退出

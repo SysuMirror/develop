@@ -195,9 +195,9 @@ export default function ProfilePage() {
           <p className="page-sub">你发出的申请、等你审批的申请，以及你参与的项目。</p>
         </div>
         <div className="row">
-          <Avatar name={user.name} src={user.avatar} size="lg" />
+          <Avatar name={displayName(user)} src={user.avatar} size="lg" />
           <div>
-            <div style={{ fontWeight: 700 }}>{user.name}</div>
+            <div style={{ fontWeight: 700 }}>{displayName(user)}</div>
             <div className="faint">{user.email || '未提供邮箱'}</div>
           </div>
         </div>

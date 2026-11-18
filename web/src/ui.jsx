@@ -31,11 +31,13 @@ export function displayName(user) {
   return user.name || user.username || UNKNOWN_USER;
 }
 
-export function Avatar({ name = '?', src, size }) {
+export function Avatar({ name, src, size }) {
   const cls = size === 'lg' ? 'avatar avatar--lg' : size === 'md' ? 'avatar avatar--md' : 'avatar';
+  // 目录不可用时名字是 null：这里必须容错，否则整页渲染会抛错变空白。
+  const initial = String(name ?? '').trim().slice(0, 1).toUpperCase() || '?';
   return (
     <span className={cls} aria-hidden="true">
-      {src ? <img src={src} alt="" /> : name.trim().slice(0, 1).toUpperCase()}
+      {src ? <img src={src} alt="" /> : initial}
     </span>
   );
 }
