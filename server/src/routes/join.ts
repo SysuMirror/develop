@@ -1,15 +1,17 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
-import { one, withTx } from '../db.js';
-import { lookup } from '../directory.js';
-import { ApiError, badRequest, conflict, wrap } from '../http.js';
+import type { Request } from 'express';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { one, withTx } from '../db.ts';
+import { lookup } from '../directory.ts';
+import { ApiError, badRequest, conflict, wrap } from '../http.ts';
 
 const router = Router();
 
 const MAX_RESUME_URL = 2048;
 const MAX_NOTE = 500;
 
-function safeEqual(left, right) {
+function safeEqual(left: unknown, right: unknown): boolean {
   const a = Buffer.from(String(left ?? ''));
   const b = Buffer.from(String(right ?? ''));
   if (a.length !== b.length) return false;
@@ -17,10 +19,10 @@ function safeEqual(left, right) {
 }
 
 // 只接受后端到后端的凭证：Authorization: Bearer <key> 或 X-Api-Key: <key>。
-function providedKey(req) {
+function providedKey(req: Request): string {
   const authorization = req.get('authorization') || '';
   const bearer = authorization.match(/^Bearer\s+(.+)$/i);
-  if (bearer) return bearer[1].trim();
+  if (bearer?.[1]) return bearer[1].trim();
   return (req.get('x-api-key') || '').trim();
 }
 
@@ -38,25 +40,25 @@ router.use((req, res, next) => {
   next();
 });
 
-function parseSsoSub(value) {
+function parseSsoSub(value: unknown): string {
   const sub = String(value ?? '').trim();
   // sub 就是 UniSSO users.id，定长 36；本地表也只用 36 存。
   if (!sub || sub.length > 36) throw badRequest('BAD_SSO_SUB', 'ssoSub 必填，且不超过 36 字符');
   return sub;
 }
 
-function parseProjectId(value) {
+function parseProjectId(value: unknown): number {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) throw badRequest('BAD_PROJECT_ID', 'projectId 必须是正整数');
   return id;
 }
 
-function parseResumeUrl(value) {
+function parseResumeUrl(value: unknown): string {
   const raw = String(value ?? '').trim();
   if (!raw || raw.length > MAX_RESUME_URL) {
     throw badRequest('BAD_RESUME_URL', `resumeUrl 必填，且不超过 ${MAX_RESUME_URL} 字符`);
   }
-  let url;
+  let url: URL;
   try {
     url = new URL(raw);
   } catch {
@@ -71,7 +73,7 @@ function parseResumeUrl(value) {
   return url.toString();
 }
 
-function parseNote(value) {
+function parseNote(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   const note = String(value).trim();
@@ -81,21 +83,43 @@ function parseNote(value) {
 
 // 用户实体在 UniSSO：这里只确认目录里确实有这个人，不往本地写任何用户记录。
 // 目录不可用时 known 为 null，不做拦截（否则 SSO 抖动会让整个接入不可用）。
-async function ensureUser(ssoSub) {
+async function ensureUser(ssoSub: string): Promise<string> {
   const { known } = await lookup(ssoSub);
   if (known === false) throw new ApiError(404, 'USER_NOT_FOUND', 'UniSSO 中不存在该用户');
   return ssoSub;
 }
 
-async function loadProject(projectId) {
-  const project = await one('SELECT id FROM projects WHERE id = ?', [projectId]);
+interface ProjectIdRow extends RowDataPacket {
+  id: number;
+}
+
+async function loadProject(projectId: number): Promise<ProjectIdRow> {
+  const project = await one<ProjectIdRow>('SELECT id FROM projects WHERE id = ?', [projectId]);
   if (!project) throw new ApiError(404, 'PROJECT_NOT_FOUND', '项目不存在');
   return project;
 }
 
-function submitApply(projectId, userId, resumeUrl, note) {
+interface ApplyIdStatusRow extends RowDataPacket {
+  id: number;
+  status: string;
+}
+
+interface SubmitOutcome {
+  id: number;
+  status: string;
+  duplicate: boolean;
+  created: boolean;
+  reopened?: boolean;
+}
+
+function submitApply(
+  projectId: number,
+  userId: string,
+  resumeUrl: string,
+  note: string | null | undefined,
+): Promise<SubmitOutcome> {
   return withTx(async (conn) => {
-    const [rows] = await conn.query(
+    const [rows] = await conn.query<ApplyIdStatusRow[]>(
       "SELECT id, status FROM applies WHERE project_id = ? AND user_id = ? AND type = 'participant' FOR UPDATE",
       [projectId, userId],
     );
@@ -105,14 +129,14 @@ function submitApply(projectId, userId, resumeUrl, note) {
       return { id: existing.id, status: 'accepted', duplicate: true, created: false };
     }
 
-    const [memberships] = await conn.query(
+    const [memberships] = await conn.query<RowDataPacket[]>(
       'SELECT id FROM project_member WHERE project_id = ? AND user_id = ? LIMIT 1',
       [projectId, userId],
     );
     if (memberships.length > 0) throw conflict('ALREADY_MEMBER', '该用户已经是项目成员');
 
     if (!existing) {
-      const [result] = await conn.query(
+      const [result] = await conn.query<ResultSetHeader>(
         `INSERT INTO applies (project_id, user_id, type, status, note, resume_url, source)
          VALUES (?, ?, 'participant', 'waiting', ?, ?, 'join')`,
         [projectId, userId, note ?? null, resumeUrl],
@@ -141,7 +165,7 @@ function submitApply(projectId, userId, resumeUrl, note) {
 router.post(
   '/applies',
   wrap(async (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const body: Record<string, unknown> = req.body && typeof req.body === 'object' ? req.body : {};
     const ssoSub = parseSsoSub(body.ssoSub);
     const projectId = parseProjectId(body.projectId);
     const resumeUrl = parseResumeUrl(body.resumeUrl);
@@ -150,12 +174,12 @@ router.post(
     const project = await loadProject(projectId);
     const userId = await ensureUser(ssoSub);
 
-    let outcome;
+    let outcome: SubmitOutcome;
     try {
       outcome = await submitApply(project.id, userId, resumeUrl, note);
     } catch (error) {
       // 两个并发请求可能同时看不到记录；后插入的那个会撞唯一键，重试一次即可读到已有行。
-      if (error?.code !== 'ER_DUP_ENTRY') throw error;
+      if ((error as { code?: unknown } | null)?.code !== 'ER_DUP_ENTRY') throw error;
       outcome = await submitApply(project.id, userId, resumeUrl, note);
     }
 

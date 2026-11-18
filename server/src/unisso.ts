@@ -6,12 +6,22 @@ const CLIENT_ID = process.env.SSO_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.SSO_CLIENT_SECRET || '';
 const TIMEOUT_MS = Number(process.env.SSO_WRITE_TIMEOUT_MS || 5000);
 
-export function qualificationWriteEnabled() {
+export function qualificationWriteEnabled(): boolean {
   return Boolean(CLIENT_ID && CLIENT_SECRET);
 }
 
+export interface QualificationErrorOptions {
+  retryable?: boolean;
+  status?: number;
+  retryAfterMs?: number;
+}
+
 export class QualificationError extends Error {
-  constructor(message, { retryable = true, status = 0, retryAfterMs = 0 } = {}) {
+  retryable: boolean;
+  status: number;
+  retryAfterMs: number;
+
+  constructor(message: string, { retryable = true, status = 0, retryAfterMs = 0 }: QualificationErrorOptions = {}) {
     super(message);
     this.name = 'QualificationError';
     this.retryable = retryable;
@@ -20,13 +30,18 @@ export class QualificationError extends Error {
   }
 }
 
+export interface QualificationWriteResult {
+  developer: boolean;
+  status: number;
+}
+
 // 目标值写入可重复调用；成功返回写入后重新读取的 developer。
-export async function updateDeveloperQualification(ssoSub, isDeveloper) {
+export async function updateDeveloperQualification(ssoSub: string, isDeveloper: boolean): Promise<QualificationWriteResult> {
   if (!qualificationWriteEnabled()) {
     throw new QualificationError('SSO 凭证未配置', { retryable: false });
   }
   const authorization = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
-  let resp;
+  let resp: Response;
   try {
     resp = await fetch(`${ISSUER}/api/oauth/developer/update`, {
       method: 'POST',
@@ -39,10 +54,11 @@ export async function updateDeveloperQualification(ssoSub, isDeveloper) {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (error) {
-    throw new QualificationError(`network: ${error.message}`, { retryable: true });
+    const message = error instanceof Error ? error.message : String(error);
+    throw new QualificationError(`network: ${message}`, { retryable: true });
   }
 
-  const data = await resp.json().catch(() => ({}));
+  const data = (await resp.json().catch(() => ({}))) as { ok?: unknown; developer?: unknown; error?: string };
   if (resp.ok && data.ok) {
     return { developer: data.developer === true, status: resp.status };
   }

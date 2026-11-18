@@ -6,29 +6,57 @@
 // 缓存策略是惰性的：启动时不预取、不做定时刷新，只有某个请求确实需要资料时才拉一次，
 // 之后在 SSO_DIRECTORY_TTL_SECONDS 内复用同一份结果。拉取失败时沿用上一次成功的结果，
 // 从未成功过就把名字留空（前端显示「未知用户」），不让页面 500。
-import { query } from './db.js';
-import { demoDirectory } from './demo-users.js';
-import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.js';
+import { query } from './db.ts';
+import { demoDirectory } from './demo-users.ts';
+import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.ts';
+import type { DirectoryUser, UserRef } from './types.ts';
 
 const REQUEST_TIMEOUT_MS = 5000;
 
-let cached = null; // { users: Map<string, user>, fetchedAt: number }
-let inflight = null;
+interface DirectoryCache {
+  users: Map<string, DirectoryUser>;
+  fetchedAt: number;
+}
+
+interface ProfileRow {
+  user_id: string;
+  name: string | null;
+  avatar: string | null;
+  email: string | null;
+}
+
+/** userinfo / users/list 里的一条原始记录。 */
+interface RawUser {
+  sub?: unknown;
+  preferred_username?: unknown;
+  name?: unknown;
+  picture?: unknown;
+  email?: unknown;
+  developer?: unknown;
+  active?: unknown;
+}
+
+let cached: DirectoryCache | null = null;
+let inflight: Promise<Map<string, DirectoryUser>> | null = null;
 let loggedFailure = false;
 
-function ttlMs() {
+function ttlMs(): number {
   const seconds = Number(process.env.SSO_DIRECTORY_TTL_SECONDS ?? 60);
   if (!Number.isFinite(seconds) || seconds < 0) return 60_000;
   return seconds * 1000;
 }
 
-function normalize(raw) {
+function str(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
+
+function normalize(raw: RawUser): DirectoryUser {
   return {
     id: String(raw.sub ?? ''),
-    username: raw.preferred_username || null,
-    name: raw.name || null,
-    avatar: raw.picture || null,
-    email: raw.email || null,
+    username: str(raw.preferred_username),
+    name: str(raw.name),
+    avatar: str(raw.picture),
+    email: str(raw.email),
     developer: raw.developer === true,
     active: raw.active !== false,
   };
@@ -36,23 +64,23 @@ function normalize(raw) {
 
 // 落库的展示缓存：登录回调抄下来的 userinfo 快照。目录里查不到的人用它兜底，
 // developer 未知就是 null，交给前端显示「资格未知」。
-function fromProfileRow(row) {
+function fromProfileRow(row: ProfileRow): DirectoryUser {
   return {
     id: String(row.user_id),
     username: null,
-    name: row.name || null,
-    avatar: row.avatar || null,
-    email: row.email || null,
+    name: str(row.name),
+    avatar: str(row.avatar),
+    email: str(row.email),
     developer: null,
     active: true,
     cached: true,
   };
 }
 
-async function readProfiles(ids) {
+async function readProfiles(ids: unknown[]): Promise<Map<string, DirectoryUser>> {
   const wanted = [...new Set((ids || []).filter(Boolean).map(String))];
   if (wanted.length === 0) return new Map();
-  const rows = await query(
+  const rows = await query<ProfileRow>(
     `SELECT user_id, name, avatar, email FROM user_profile
       WHERE user_id IN (${wanted.map(() => '?').join(',')})`,
     wanted,
@@ -60,7 +88,7 @@ async function readProfiles(ids) {
   return new Map(rows.map((row) => [String(row.user_id), fromProfileRow(row)]));
 }
 
-async function saveProfile(user) {
+async function saveProfile(user: DirectoryUser): Promise<void> {
   try {
     await query(
       `INSERT INTO user_profile (user_id, name, avatar, email) VALUES (?, ?, ?, ?)
@@ -68,11 +96,11 @@ async function saveProfile(user) {
       [user.id, user.name, user.avatar, user.email],
     );
   } catch (error) {
-    console.error('[directory] user_profile 写入失败：', error.message);
+    console.error('[directory] user_profile 写入失败：', messageOfError(error));
   }
 }
 
-async function fetchDirectory() {
+async function fetchDirectory(): Promise<Map<string, DirectoryUser>> {
   const { issuer, clientId, clientSecret } = ssoCredentials();
   if (!issuer || !clientId || !clientSecret) {
     throw new Error('未配置 SSO_ISSUER / SSO_CLIENT_ID / SSO_CLIENT_SECRET');
@@ -88,17 +116,17 @@ async function fetchDirectory() {
     const text = await response.text().catch(() => '');
     throw new Error(`users/list 返回 ${response.status} ${text.slice(0, 200)}`.trim());
   }
-  const body = await response.json().catch(() => null);
+  const body = (await response.json().catch(() => null)) as { users?: unknown } | null;
   if (!body || !Array.isArray(body.users)) throw new Error('users/list 响应缺少 users 数组');
-  const users = new Map();
-  for (const raw of body.users) {
+  const users = new Map<string, DirectoryUser>();
+  for (const raw of body.users as RawUser[]) {
     const user = normalize(raw);
     if (user.id) users.set(user.id, user);
   }
   return users;
 }
 
-async function load() {
+async function load(): Promise<Map<string, DirectoryUser>> {
   if (!ssoConfigured()) {
     // 没有真实目录可查：DEV_LOGIN 的演示身份由 withDemo() 合并，否则让 snapshot() 走降级。
     if (devLoginEnabled()) return new Map();
@@ -112,9 +140,6 @@ async function load() {
       loggedFailure = false;
       return users;
     })
-    .catch((error) => {
-      throw error;
-    })
     .finally(() => {
       inflight = null;
     });
@@ -122,30 +147,39 @@ async function load() {
 }
 
 // DEV_LOGIN 只叠加演示身份；配置了 SSO 时仍然拉真实目录，密码登录的资格刷新依赖它。
-function withDemo(users) {
+function withDemo(users: Map<string, DirectoryUser>): Map<string, DirectoryUser> {
   if (!devLoginEnabled()) return users;
   const merged = new Map(demoDirectory().map((user) => [user.id, user]));
   for (const [id, user] of users) merged.set(id, user);
   return merged;
 }
 
+export interface Snapshot {
+  users: Map<string, DirectoryUser>;
+  stale: boolean;
+}
+
 // 取目录快照，永不抛错：失败时 stale=true，名字交给调用方降级。
-export async function snapshot() {
+export async function snapshot(): Promise<Snapshot> {
   try {
     return { users: withDemo(await load()), stale: false };
   } catch (error) {
     // 连续失败只在第一次打日志，否则每个请求都会刷一行。
     if (!loggedFailure) {
       loggedFailure = true;
-      console.error('[directory] 用户目录拉取失败，展示降级为「未知用户」：', error.message);
+      console.error('[directory] 用户目录拉取失败，展示降级为「未知用户」：', messageOfError(error));
     }
     return { users: withDemo(cached?.users ?? new Map()), stale: true };
   }
 }
 
+function messageOfError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // 登录回调已经拿到了权威的 userinfo：先塞进缓存。这样即使 users/list 不可用，
 // 当前用户自己也总有名字可显示（别人仍然可能是「未知用户」）。
-export async function remember(raw) {
+export async function remember(raw: RawUser | null | undefined): Promise<void> {
   const user = normalize(raw ?? {});
   if (!user.id) return;
   const users = new Map(cached?.users ?? []);
@@ -159,50 +193,55 @@ export async function remember(raw) {
     email: user.email ?? previous?.email ?? null,
   });
   cached = { users, fetchedAt: cached?.fetchedAt ?? 0 };
-  await saveProfile(users.get(user.id));
+  const stored = users.get(user.id);
+  if (stored) await saveProfile(stored);
 }
 
 // 目录里没有的人从 user_profile 落库缓存补。表很小（每个登录过的人一行），
 // 一次全取比逐 id 拼 SQL 简单；目录可用时也没必要按 id 过滤。
-async function readCachedProfiles(directory) {
+async function readCachedProfiles(directory: Map<string, DirectoryUser>): Promise<DirectoryUser[]> {
   try {
-    const rows = await query('SELECT user_id, name, avatar, email FROM user_profile');
-    return rows
-      .filter((row) => !directory.has(String(row.user_id)))
-      .map(fromProfileRow);
+    const rows = await query<ProfileRow>('SELECT user_id, name, avatar, email FROM user_profile');
+    return rows.filter((row) => !directory.has(String(row.user_id))).map(fromProfileRow);
   } catch (error) {
-    console.error('[directory] user_profile 读取失败：', error.message);
+    console.error('[directory] user_profile 读取失败：', messageOfError(error));
     return [];
   }
 }
 
-export async function getUser(id) {
+export async function getUser(id: unknown): Promise<DirectoryUser | null> {
   if (!id) return null;
   const users = await getUsers([id]);
   return users.get(String(id)) ?? null;
 }
 
 // 目录优先，user_profile 补缺；两者都没有就是查无此人。
-export async function getUsers(ids) {
+export async function getUsers(ids: unknown[]): Promise<Map<string, DirectoryUser>> {
   const wanted = [...new Set((ids || []).filter(Boolean).map(String))];
-  const found = new Map();
+  const found = new Map<string, DirectoryUser>();
   if (wanted.length === 0) return found;
   const { users: directory } = await snapshot();
-  const missing = [];
+  const missing: string[] = [];
   for (const id of wanted) {
     const user = directory.get(id);
     if (user) found.set(id, user);
     else missing.push(id);
   }
   if (missing.length > 0) {
-    const cached = await readProfiles(missing);
-    for (const [id, user] of cached) found.set(id, user);
+    const profiles = await readProfiles(missing);
+    for (const [id, user] of profiles) found.set(id, user);
   }
   return found;
 }
 
+export interface LookupResult {
+  /** true 明确存在；false 明确不存在；null 目录不可用、不做判断。 */
+  known: boolean | null;
+  user: DirectoryUser | null;
+}
+
 // join 平台可能替还没登录过的人提交申请：known=true/false 是明确结论，null 表示目录不可用、不做判断。
-export async function lookup(id) {
+export async function lookup(id: unknown): Promise<LookupResult> {
   const key = String(id ?? '').trim();
   if (!key) return { known: false, user: null };
   const { users: directory, stale } = await snapshot();
@@ -211,12 +250,24 @@ export async function lookup(id) {
   return { known: stale ? null : false, user: null };
 }
 
-export async function searchUsers({ q = '', page = 1, pageSize = 20 } = {}) {
+export interface SearchUsersOptions {
+  q?: unknown;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface SearchUsersResult {
+  items: DirectoryUser[];
+  total: number;
+  stale: boolean;
+}
+
+export async function searchUsers({ q = '', page = 1, pageSize = 20 }: SearchUsersOptions = {}): Promise<SearchUsersResult> {
   const { users: directory, stale } = await snapshot();
   // 目录 ∪ user_profile：登录过但目录查不到的人（或目录完全不可用时）靠缓存显示名字。
-  const cached = await readCachedProfiles(directory);
-  const term = String(q).trim().toLowerCase();
-  let list = [...directory.values(), ...cached].filter((user) => user.active !== false);
+  const cachedUsers = await readCachedProfiles(directory);
+  const term = String(q ?? '').trim().toLowerCase();
+  let list = [...directory.values(), ...cachedUsers].filter((user) => user.active !== false);
   if (term) {
     list = list.filter((user) =>
       [user.name, user.username, user.email, user.id].some((value) =>
@@ -224,18 +275,16 @@ export async function searchUsers({ q = '', page = 1, pageSize = 20 } = {}) {
       ),
     );
   }
-  list.sort((a, b) =>
-    String(a.name || a.username || a.id).localeCompare(String(b.name || b.username || b.id), 'zh'),
-  );
+  list.sort((a, b) => String(a.name || a.username || a.id).localeCompare(String(b.name || b.username || b.id), 'zh'));
   const total = list.length;
   const offset = (page - 1) * pageSize;
   return { items: list.slice(offset, offset + pageSize), total, stale };
 }
 
 // 接口里引用某个用户时的统一形状；user 缺失说明目录里没有或目录不可用，前端显示「未知用户」。
-export function userRef(id, user) {
+export function userRef(id: unknown, user: DirectoryUser | null | undefined): UserRef {
   return {
-    id: id ?? null,
+    id: id == null ? null : String(id),
     name: user?.name ?? null,
     username: user?.username ?? null,
     avatar: user?.avatar ?? null,

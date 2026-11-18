@@ -85,7 +85,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
    没有分页也没有单查，所以结果缓存在进程内：惰性拉取（启动不预取、无定时刷新）、
    =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内复用、并发请求共享同一次拉取。
 2. =user_profile= 表 —— 登录回调拿到 =userinfo= 后抄一份 =name/avatar/email= 落库
-   （ =server/src/directory.js= 的 =remember()= ，写失败只记日志不影响登录）。
+   （ =server/src/directory.ts= 的 =remember()= ，写失败只记日志不影响登录）。
 
 取名顺序是：目录命中 → =user_profile= 回落 → 都没有就是 =null= ，前端显示「未知用户」，
 接口带 =directoryStale: true= 提示。业务不因此失败。列表 =/api/users= 是「目录 ∪ user_profile」，
@@ -93,7 +93,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 
 只从缓存拿到资料的人 =developer= 返回 =null= （未知），页面显示「资格未知」。
 
-=DEV_LOGIN= 打开时 =server/src/demo-users.js= 的演示身份会合并进目录（同 id 以真实目录为准）；
+=DEV_LOGIN= 打开时 =server/src/demo-users.ts= 的演示身份会合并进目录（同 id 以真实目录为准）；
 未配置 SSO 时目录只含演示身份，不访问 SSO。
 
 ** 资格回写
@@ -227,9 +227,9 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 | 项目成员         | 申请通过后写入 =project_member=                                     | 发布需求、标记需求完成、自行退出项目                    |
 | 需求接单人       | 接单（写入 =demands.user_id= ）                                     | 标记自己接的需求完成                                    |
 
-服务端的鉴权顺序在 =server/src/index.js= ： =/api/join= 先挂（不走会话，共享密钥），其余 =/api=
+服务端的鉴权顺序在 =server/src/index.ts= ： =/api/join= 先挂（不走会话，共享密钥），其余 =/api= 
 先 =requireUser= 再 =requireDeveloper= ，最后才进 users / projects / applies / demands 四个路由。
-路由内部再用 =server/src/access.js= 的 =requireLeader= / =requireApplyDecider= / =requireMember=
+路由内部再用 =server/src/access.ts= 的 =requireLeader= / =requireApplyDecider= / =requireMember= 
 收紧到项目维度。
 
 * 七、外部接入：join 平台
@@ -269,9 +269,11 @@ join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/ap
 
 * 八、技术栈
 
-- 后端：Node 18+ + Express 4 + MySQL 8（ =mysql2= ），ESM 原生模块，无构建步骤；
+- 后端：Node 22+ + Express 4 + MySQL 8（ =mysql2= ），TypeScript 编译成 ESM 后由 Node 运行；
+  构建产物在 =server/dist= ，类型检查用 =npm run typecheck= ，开发时 =npm run dev= 由 Node 自己的
+  类型剥离直接跑 =src/index.ts= （不引入 tsx）；
   会话落 =sessions= 表，Cookie 用 =SESSION_SECRET= 做 HMAC 签名。
-- 前端：React 18 + React Router 6 + Vite 5，样式是手写 CSS（ =web/src/styles.css= ），
+- 前端：React 18 + React Router 6 + Vite 5 + TypeScript，样式是手写 CSS（ =web/src/styles.css= ），
   没有 UI 框架。
 - 部署：单进程单端口，前后端同源； =PORT= 默认 8080，对外只需一个端口。
 
@@ -284,7 +286,8 @@ join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/ap
   cp .env.example .env      # 填 MYSQL_* 等
   npm install
   npm run migrate           # 建表；SEED=1 时顺便造演示数据
-  npm start                 # 0.0.0.0:8080
+  npm run dev               # 开发模式：node --watch 直接跑 src/index.ts，0.0.0.0:8080
+  # 或者 npm run build && npm start（跑编译后的 dist/index.js）
 #+end_src
 
 ** 前端
@@ -316,17 +319,20 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 * 十、构建与部署
 
 #+begin_src sh
-  cd web && npm install && npm run build     # 产物在 web/dist
-  cd ../server && npm install && npm start    # 0.0.0.0:8080
+  cd web && npm install && npm run build     # 先 tsc --noEmit 再 vite build，产物在 web/dist
+  cd ../server && npm install && npm run build && npm start    # 0.0.0.0:8080
 #+end_src
 
-- 后端不需要构建，直接跑源码；只有前端要 =vite build= 。
-- 静态托管在 =server/src/index.js= ： =express.static("../../web/dist")= 带 1 小时缓存，
+- 两端都是 TypeScript，各自有 =tsconfig.json= ，但发布物不同：前端是 =vite build= 的静态产物，
+  后端是 =tsc= 编到 =server/dist= 的 JavaScript（ =npm run build= 顺带把 =schema.sql= 复制过去，
+  因为 =migrate= 按自身路径找它）。 =npm start= 跑 =dist/index.js= ，=npm run dev= 跑源码，
+  两者的加载路径都不经过 =tsx= 。
+- 静态托管在 =server/src/index.ts= ： =express.static("../../web/dist")= 带 1 小时缓存，
   非 =/api/= 的 GET 回落到 =index.html= ；每次请求才判断 =index.html= 是否存在，所以进程先起、
   再构建前端也能直接生效，不必重启。
 - =dist= 不存在时非 API 请求返回纯文本「前端尚未构建，请先在 web/ 目录运行 npm run build。」。
-- 容器内可用 =server/run-dev.sh= ：先杀掉占用 8080 的旧进程，再 =setsid node src/index.js=
-  后台启动，日志写到 =/tmp/api.log= ，最后 =curl /api/health= 自检。
+- 容器内可用 =server/run-dev.sh= ：先 =npm run build= ，再杀掉占用 8080 的旧进程、
+   =setsid node dist/index.js= 后台启动，日志写到 =/tmp/api.log= ，最后 =curl /api/health= 自检。
 - 进程内还有两处兜底： =unhandledRejection= / =uncaughtException= 只记日志不让进程退出；
   Express 4 的 async 处理器统一用 =wrap()= 包住，否则 rejection 会直接掀掉进程。
 
@@ -510,7 +516,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 
 * 十四、FAQ
 
-- 本地没有 SSO 应用怎么登录？把 =DEV_LOGIN= 设为 =1= ， =/login= 会列出 =demo-users.js= 里的演示身份。
+- 本地没有 SSO 应用怎么登录？把 =DEV_LOGIN= 设为 =1= ， =/login= 会列出 =demo-users.ts= 里的演示身份。
 - 登录成功但提示没有资格？业务接口只认 =userinfo= 里严格为 =true= 的 =developer= ；去集市完成
   开发者认证，或申请加入一个项目，通过后由资格回写授予。
 - join 平台调用为什么 503？ =JOIN_API_KEY= 没配，或与 join 侧不一致。
@@ -525,36 +531,41 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 
 #+begin_src text
   server/
+    tsconfig.json     # tsc 配置：src → dist，strict + noUncheckedIndexedAccess
     src/
-      index.js        # 组装 Express、路由挂载、静态托管、错误处理
-      auth.js         # UniSSO 授权 / 回调 / 会话 / 资格门禁
-      unisso.js       # SSO 端点封装
-      sso-config.js   # 从环境变量读 SSO 配置
-      directory.js    # 用户目录缓存 + user_profile 兜底
-      qual-sync.js    # 资格回写队列与重试
-      access.js       # 项目 / 成员 / leader 鉴权
-      http.js         # 错误类型、分页、wrap
-      db.js           # 连接池与事务辅助
-      migrate.js      # 执行 schema.sql（SEED=1 时造演示数据）
+      index.ts        # 组装 Express、路由挂载、静态托管、错误处理
+      auth.ts         # UniSSO 授权 / 回调 / 会话 / 资格门禁
+      unisso.ts       # SSO 端点封装
+      sso-config.ts   # 从环境变量读 SSO 配置
+      directory.ts    # 用户目录缓存 + user_profile 兜底
+      qual-sync.ts    # 资格回写队列与重试
+      access.ts       # 项目 / 成员 / leader 鉴权
+      http.ts         # 错误类型、分页、wrap
+      db.ts           # 连接池与事务辅助
+      types.ts        # 数据库行与会话用户的共享类型
+      express.d.ts    # 给 req.cookies / req.user 补类型
+      migrate.ts      # 执行 schema.sql（SEED=1 时造演示数据）
       schema.sql      # 建表脚本
-      demo-users.js   # DEV_LOGIN 演示身份
+      demo-users.ts   # DEV_LOGIN 演示身份
       routes/
-        users.js      # 目录搜索 / 用户详情
-        projects.js   # 项目 CRUD、转让、释放、成员移除
-        applies.js    # 申请、审批、撤回
-        demands.js    # 需求发布、接单、完成
-        join.js       # join 平台接入（共享密钥）
+        users.ts      # 目录搜索 / 用户详情
+        projects.ts   # 项目 CRUD、转让、释放、成员移除
+        applies.ts    # 申请、审批、撤回
+        demands.ts    # 需求发布、接单、完成
+        join.ts       # join 平台接入（共享密钥）
     run-dev.sh        # 本地/容器内重启后端并自检
   web/
+    tsconfig.json     # web 侧 tsc 配置（只做类型检查，noEmit）
     src/
-      App.jsx         # 路由表与 Layout、RequireAuth
-      api.js          # fetch 封装与错误码文案
-      auth.jsx        # 登录态
-      hooks.js        # 数据请求 hook
-      ui.jsx          # 表格 / 徽章 / 空态等基础组件
+      App.tsx         # 路由表与 Layout、RequireAuth
+      api.ts          # fetch 封装与错误码文案
+      auth.tsx        # 登录态
+      hooks.ts        # 数据请求 hook
+      types.ts        # 接口返回值的类型定义
+      ui.tsx          # 表格 / 徽章 / 空态等基础组件
       styles.css      # 全部样式
       pages/          # Home / Login / Projects / ProjectDetail / Users /
                       # UserDetail / Demands / Profile / NoQualification
-    vite.config.js    # 5173 端口与 /api 代理
+    vite.config.ts    # 5173 端口与 /api 代理
   static/er-clean.png # ER 图导出
 #+end_src

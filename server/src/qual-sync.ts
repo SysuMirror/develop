@@ -1,25 +1,43 @@
-import { query } from './db.js';
-import { qualificationWriteEnabled, updateDeveloperQualification } from './unisso.js';
+import { query } from './db.ts';
+import { qualificationWriteEnabled, updateDeveloperQualification } from './unisso.ts';
 
 // 每个开发者只保留最新目标值；重试同一目标值即可，不需要补偿历史。
 const MAX_ATTEMPTS = 20;
 const BACKOFF_CAP_MS = 10 * 60_000;
 const DEFAULT_RETRY_MS = 3000;
 
-let timer = null;
+let timer: NodeJS.Timeout | null = null;
 let running = false;
 let disabledLogged = false;
 
-function toMysqlDate(date) {
+interface QualSyncRow {
+  id: number;
+  user_id: string;
+  target_value: number | string | boolean;
+  attempts: number | string;
+}
+
+/** 错误上挂的重试元信息：retryable === false 表示重试也不会变好。 */
+interface RetryableError extends Error {
+  retryable?: boolean;
+  retryAfterMs?: number;
+}
+
+function errorMeta(error: unknown): RetryableError {
+  if (error instanceof Error) return error as RetryableError;
+  return new Error(String(error));
+}
+
+function toMysqlDate(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-function backoffMs(attempts, retryAfterMs = 0) {
+function backoffMs(attempts: number, retryAfterMs = 0): number {
   const exponential = Math.min(DEFAULT_RETRY_MS * 2 ** Math.max(0, attempts - 1), BACKOFF_CAP_MS);
   return Math.max(exponential, retryAfterMs);
 }
 
-export async function enqueueQualification(userId, targetValue) {
+export async function enqueueQualification(userId: string | null | undefined, targetValue: boolean): Promise<void> {
   if (!userId) return;
   await query(
     `INSERT INTO developer_qual_sync (user_id, target_value, status, attempts, last_error, next_attempt_at)
@@ -33,52 +51,53 @@ export async function enqueueQualification(userId, targetValue) {
     [userId, targetValue ? 1 : 0],
   );
   // 立即尝试一次，不阻塞调用方；失败由下一轮重试。
-  void runQualSyncOnce().catch((error) => console.error('[qual-sync]', error.message));
+  void runQualSyncOnce().catch((error: unknown) => console.error('[qual-sync]', errorMeta(error).message));
 }
 
 // 被开除 / 退出 / 释放项目后调用：只有确实不再属于任何项目才撤销资格。
-export async function revokeIfNoMembership(userId) {
+export async function revokeIfNoMembership(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
-  const [{ n }] = await query('SELECT COUNT(*) AS n FROM project_member WHERE user_id = ?', [userId]);
-  if (Number(n) > 0) return false;
+  const [row] = await query<{ n: number | string }>('SELECT COUNT(*) AS n FROM project_member WHERE user_id = ?', [userId]);
+  if (Number(row?.n ?? 0) > 0) return false;
   await enqueueQualification(userId, false);
   return true;
 }
 
-async function pushRow(row) {
+async function pushRow(row: QualSyncRow): Promise<void> {
   const target = Number(row.target_value) === 1;
   const result = await updateDeveloperQualification(row.user_id, target);
   if (result.developer !== target) {
     // 写入成功但读回值不一致（并发写入），按可重试处理，下一轮再写同一目标值。
-    const error = new Error(`qualification mismatch: want ${target}, got ${result.developer}`);
+    const error: RetryableError = new Error(`qualification mismatch: want ${target}, got ${result.developer}`);
     error.retryable = true;
     throw error;
   }
   await query("UPDATE developer_qual_sync SET status = 'done', last_error = NULL WHERE id = ?", [row.id]);
 }
 
-async function markFailure(row, error) {
+async function markFailure(row: QualSyncRow, error: unknown): Promise<void> {
+  const meta = errorMeta(error);
   const attempts = Number(row.attempts) + 1;
-  const terminal = error.retryable === false || attempts >= MAX_ATTEMPTS;
+  const terminal = meta.retryable === false || attempts >= MAX_ATTEMPTS;
   if (terminal) {
     await query("UPDATE developer_qual_sync SET status = 'failed', attempts = ?, last_error = ? WHERE id = ?", [
       attempts,
-      String(error.message || error).slice(0, 255),
+      meta.message.slice(0, 255),
       row.id,
     ]);
-    console.error(`[qual-sync] user ${row.user_id} failed: ${error.message || error}`);
+    console.error(`[qual-sync] user ${row.user_id} failed: ${meta.message}`);
     return;
   }
-  const next = new Date(Date.now() + backoffMs(attempts, error.retryAfterMs || 0));
+  const next = new Date(Date.now() + backoffMs(attempts, meta.retryAfterMs || 0));
   await query(
     `UPDATE developer_qual_sync
         SET attempts = ?, last_error = ?, next_attempt_at = ?
       WHERE id = ?`,
-    [attempts, String(error.message || error).slice(0, 255), toMysqlDate(next), row.id],
+    [attempts, meta.message.slice(0, 255), toMysqlDate(next), row.id],
   );
 }
 
-export async function runQualSyncOnce() {
+export async function runQualSyncOnce(): Promise<void> {
   if (running) return;
   if (!qualificationWriteEnabled()) {
     if (!disabledLogged) {
@@ -89,7 +108,7 @@ export async function runQualSyncOnce() {
   }
   running = true;
   try {
-    const rows = await query(
+    const rows = await query<QualSyncRow>(
       `SELECT id, user_id, target_value, attempts
          FROM developer_qual_sync
         WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
@@ -108,14 +127,14 @@ export async function runQualSyncOnce() {
   }
 }
 
-export function startQualSyncWorker() {
+export function startQualSyncWorker(): NodeJS.Timeout | null {
   const interval = Number(process.env.QUAL_SYNC_INTERVAL_MS ?? 15000);
   if (!Number.isFinite(interval) || interval <= 0) return null;
   if (timer) return timer;
   timer = setInterval(() => {
-    void runQualSyncOnce().catch((error) => console.error('[qual-sync]', error.message));
+    void runQualSyncOnce().catch((error: unknown) => console.error('[qual-sync]', errorMeta(error).message));
   }, interval);
   // 不阻止进程退出；服务器本身由 listen 保活。
-  timer.unref?.();
+  timer.unref();
   return timer;
 }

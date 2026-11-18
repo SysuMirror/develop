@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { loadMembership, loadProject, requireApplyDecider } from '../access.js';
-import { one, query, withTx } from '../db.js';
-import { getUsers, userRef } from '../directory.js';
-import { badRequest, conflict, forbidden, notFound, wrap } from '../http.js';
-import { enqueueQualification } from '../qual-sync.js';
+import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { loadMembership, loadProject, requireApplyDecider } from '../access.ts';
+import { one, query, withTx } from '../db.ts';
+import { getUsers, userRef } from '../directory.ts';
+import { ApiError, badRequest, conflict, forbidden, notFound, wrap } from '../http.ts';
+import { enqueueQualification } from '../qual-sync.ts';
+import type { ApplyJoinedRow, ApplyRow, DirectoryUser } from '../types.ts';
 
 const router = Router();
 
@@ -14,7 +16,7 @@ const APPLY_SELECT = `
     FROM applies a
     JOIN projects p ON p.id = a.project_id`;
 
-function mapApply(row, people) {
+function mapApply(row: ApplyJoinedRow, people: Map<string, DirectoryUser>) {
   return {
     id: row.id,
     type: row.type,
@@ -30,7 +32,7 @@ function mapApply(row, people) {
 }
 
 // 一条 SQL 取全部申请，再由目录补申请人资料。
-async function mapApplies(rows) {
+async function mapApplies(rows: ApplyJoinedRow[]) {
   const people = await getUsers(rows.map((row) => row.user_id));
   return rows.map((row) => mapApply(row, people));
 }
@@ -40,6 +42,7 @@ router.post(
   wrap(async (req, res) => {
     const project = await loadProject(req.params.id);
     const user = req.user;
+    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const type = String(req.body?.type || 'participant');
     const note = req.body?.note == null ? null : String(req.body.note).trim();
     if (!['leader', 'participant'].includes(type)) throw badRequest('BAD_TYPE', 'type 只能是 leader 或 participant');
@@ -48,7 +51,7 @@ router.post(
     if (membership) throw conflict('ALREADY_MEMBER', '你已经是该项目成员');
     if (type === 'leader' && project.leader_id !== null) throw conflict('LEADER_EXISTS', '该项目已有 leader');
 
-    const existing = await one('SELECT * FROM applies WHERE project_id = ? AND user_id = ? AND type = ?', [
+    const existing = await one<ApplyRow>('SELECT * FROM applies WHERE project_id = ? AND user_id = ? AND type = ?', [
       project.id,
       user.id,
       type,
@@ -63,20 +66,21 @@ router.post(
       res.status(201).json({ id: existing.id, status: 'waiting' });
       return;
     }
-    const result = await query(
+    const result = await query<ResultSetHeader>(
       "INSERT INTO applies (project_id, user_id, type, status, note) VALUES (?, ?, ?, 'waiting', ?)",
       [project.id, user.id, type, note],
     );
-    res.status(201).json({ id: result.insertId, status: 'waiting' });
+    res.status(201).json({ id: result[0]?.insertId, status: 'waiting' });
   }),
 );
 
 router.get(
   '/applies/mine',
   wrap(async (req, res) => {
-    const rows = await query(`${APPLY_SELECT} WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 100`, [
-      req.user.id,
-    ]);
+    const rows = await query<ApplyJoinedRow>(
+      `${APPLY_SELECT} WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 100`,
+      [req.user?.id],
+    );
     res.json({ items: await mapApplies(rows) });
   }),
 );
@@ -84,12 +88,12 @@ router.get(
 router.get(
   '/applies/inbox',
   wrap(async (req, res) => {
-    const rows = await query(
+    const rows = await query<ApplyJoinedRow>(
       `${APPLY_SELECT}
         WHERE a.status = 'waiting'
           AND (p.leader_id = ? OR (p.leader_id IS NULL AND a.type = 'leader'))
         ORDER BY a.created_at`,
-      [req.user.id],
+      [req.user?.id],
     );
     res.json({ items: await mapApplies(rows) });
   }),
@@ -98,13 +102,15 @@ router.get(
 router.post(
   '/applies/:id/accept',
   wrap(async (req, res) => {
-    const apply = await one(`${APPLY_SELECT} WHERE a.id = ?`, [Number(req.params.id)]);
+    const apply = await one<ApplyJoinedRow>(`${APPLY_SELECT} WHERE a.id = ?`, [Number(req.params.id)]);
     if (!apply) throw notFound('申请不存在');
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '该申请已被处理');
-    requireApplyDecider(apply, req.user, apply.type);
+    const decider = req.user;
+    if (!decider) throw forbidden('NOT_LEADER', '请先登录');
+    await requireApplyDecider(apply, decider, apply.type);
 
     await withTx(async (conn) => {
-      const [memberships] = await conn.query(
+      const [memberships] = await conn.query<RowDataPacket[]>(
         'SELECT role FROM project_member WHERE project_id = ? AND user_id = ? FOR UPDATE',
         [apply.project_id, apply.user_id],
       );
@@ -122,32 +128,29 @@ router.post(
         ]);
       }
       if (apply.type === 'leader') {
-        const [updated] = await conn.query(
+        const [updated] = await conn.query<ResultSetHeader>(
           'UPDATE projects SET leader_id = ? WHERE id = ? AND leader_id IS NULL',
           [apply.user_id, apply.project_id],
         );
         if (updated.affectedRows === 0) {
-          const error = new Error('该项目已有 leader');
-          error.status = 409;
-          error.code = 'LEADER_EXISTS';
-          throw error;
+          throw new ApiError(409, 'LEADER_EXISTS', '该项目已有 leader');
         }
       }
       await conn.query("UPDATE applies SET status = 'accepted', decided_at = NOW(), decided_by = ? WHERE id = ?", [
-        req.user.id,
+        decider.id,
         apply.id,
       ]);
       await conn.query(
         `UPDATE applies SET status = 'rejected', decided_at = NOW(), decided_by = ?
           WHERE project_id = ? AND status = 'waiting' AND id <> ?`,
-        [req.user.id, apply.project_id, apply.id],
+        [decider.id, apply.project_id, apply.id],
       );
     });
     // 审批通过即授予全局开发者资格；写入失败不影响审批，由待同步表重试。
     try {
       await enqueueQualification(apply.user_id, true);
     } catch (error) {
-      console.error('[qual-sync] enqueue grant failed', error.message);
+      console.error('[qual-sync] enqueue grant failed', error instanceof Error ? error.message : String(error));
     }
     res.json({ ok: true });
   }),
@@ -156,12 +159,14 @@ router.post(
 router.post(
   '/applies/:id/reject',
   wrap(async (req, res) => {
-    const apply = await one(`${APPLY_SELECT} WHERE a.id = ?`, [Number(req.params.id)]);
+    const apply = await one<ApplyJoinedRow>(`${APPLY_SELECT} WHERE a.id = ?`, [Number(req.params.id)]);
     if (!apply) throw notFound('申请不存在');
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '该申请已被处理');
-    requireApplyDecider(apply, req.user, apply.type);
+    const decider = req.user;
+    if (!decider) throw forbidden('NOT_LEADER', '请先登录');
+    await requireApplyDecider(apply, decider, apply.type);
     await query("UPDATE applies SET status = 'rejected', decided_at = NOW(), decided_by = ? WHERE id = ?", [
-      req.user.id,
+      decider.id,
       apply.id,
     ]);
     res.json({ ok: true });
@@ -171,9 +176,9 @@ router.post(
 router.delete(
   '/applies/:id',
   wrap(async (req, res) => {
-    const apply = await one('SELECT * FROM applies WHERE id = ?', [Number(req.params.id)]);
+    const apply = await one<ApplyRow>('SELECT * FROM applies WHERE id = ?', [Number(req.params.id)]);
     if (!apply) throw notFound('申请不存在');
-    if (apply.user_id !== req.user.id) throw forbidden('NOT_OWNER', '只能撤回自己的申请');
+    if (apply.user_id !== req.user?.id) throw forbidden('NOT_OWNER', '只能撤回自己的申请');
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '只有等待中的申请可以撤回');
     await query('DELETE FROM applies WHERE id = ?', [apply.id]);
     res.json({ ok: true });

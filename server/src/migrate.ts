@@ -2,26 +2,28 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pool, query } from './db.js';
-import { DEMO_USERS } from './demo-users.js';
+import { execute, pool, query } from './db.ts';
+import { DEMO_USERS } from './demo-users.ts';
 
+// 构建产物在 dist/，schema.sql 由 build 脚本一起复制过去；开发时直接读 src/。
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 // CREATE TABLE IF NOT EXISTS 不会给旧表补列，已存在的库靠这里增量迁移。
-async function ensureColumn(table, column, definition) {
-  const [{ n }] = await query(
+// 调用方传完整的 ALTER 语句字面量，避免把标识符拼进 SQL。
+async function ensureColumn(table: string, column: string, alterStatement: string): Promise<boolean> {
+  const [row] = await query<{ n: number | string }>(
     `SELECT COUNT(*) AS n
        FROM information_schema.COLUMNS
       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
     [table, column],
   );
-  if (Number(n) > 0) return false;
-  await query(`ALTER TABLE \`${table}\` ADD COLUMN ${definition}`);
+  if (Number(row?.n ?? 0) > 0) return false;
+  await query(alterStatement);
   console.log(`added column ${table}.${column}`);
   return true;
 }
 
-async function migrate() {
+async function migrate(): Promise<void> {
   const sql = fs.readFileSync(path.join(here, 'schema.sql'), 'utf8');
   const statements = sql
     .split(';')
@@ -31,51 +33,57 @@ async function migrate() {
     await query(statement);
   }
   // 旧库可能还是 developer_id 结构；这里只补列，不做数据迁移（用户实体已不在本地）。
-  await ensureColumn('applies', 'resume_url', 'resume_url VARCHAR(2048) NULL AFTER note');
-  await ensureColumn('applies', 'source', "source ENUM('web','join') NOT NULL DEFAULT 'web' AFTER resume_url");
-  await ensureColumn('sessions', 'access_token', 'access_token TEXT NULL AFTER user_id');
+  await ensureColumn('applies', 'resume_url', 'ALTER TABLE applies ADD COLUMN resume_url VARCHAR(2048) NULL AFTER note');
+  await ensureColumn(
+    'applies',
+    'source',
+    "ALTER TABLE applies ADD COLUMN source ENUM('web','join') NOT NULL DEFAULT 'web' AFTER resume_url",
+  );
+  await ensureColumn('sessions', 'access_token', 'ALTER TABLE sessions ADD COLUMN access_token TEXT NULL AFTER user_id');
   await ensureColumn(
     'sessions',
     'access_token_expires_at',
-    'access_token_expires_at DATETIME NULL AFTER access_token',
+    'ALTER TABLE sessions ADD COLUMN access_token_expires_at DATETIME NULL AFTER access_token',
   );
   await ensureColumn(
     'sessions',
     'auth_method',
-    "auth_method VARCHAR(16) NOT NULL DEFAULT 'sso' AFTER user_id",
+    "ALTER TABLE sessions ADD COLUMN auth_method VARCHAR(16) NOT NULL DEFAULT 'sso' AFTER user_id",
   );
-  await ensureColumn('sessions', 'developer', 'developer TINYINT(1) NULL AFTER auth_method');
+  await ensureColumn('sessions', 'developer', 'ALTER TABLE sessions ADD COLUMN developer TINYINT(1) NULL AFTER auth_method');
   console.log(`schema ok (${statements.length} statements)`);
 }
 
 // 演示数据的用户标识就是写死的假 sub（真实 sub 由 UniSSO 提供，本地造不出来）。
-async function seed() {
-  const [{ n }] = await query('SELECT COUNT(*) AS n FROM projects');
-  if (Number(n) > 0) {
+async function seed(): Promise<void> {
+  const [counted] = await query<{ n: number | string }>('SELECT COUNT(*) AS n FROM projects');
+  if (Number(counted?.n ?? 0) > 0) {
     console.log('seed skipped: projects not empty');
     return;
   }
-  const sub = (index) => DEMO_USERS[index].id;
+  const sub = (index: number): string => DEMO_USERS[index]?.id ?? `dev-${index + 1}`;
 
-  const projects = [
+  const projects: Array<[string, string, string]> = [
     ['软工集市 · 需求撮合', '把院内项目需求与学生开发者撮合起来，含需求发布、接单与交付验收。', sub(0)],
     ['课程项目归档系统', '收集各课程的项目文档与代码，生成可检索的归档索引。', sub(1)],
     ['SSO 接入示例集', '整理 UniSSO 在各语言下的接入样例与联调脚本。', sub(2)],
     ['院系活动报名台', '活动发布、报名、签到与统计，面向全院社团。', sub(0)],
   ];
   for (const [title, misc, leaderId] of projects) {
-    const result = await query(
-      'INSERT INTO projects (title, misc, leader_id, created_by) VALUES (?, ?, ?, ?)',
-      [title, misc, leaderId, leaderId],
-    );
+    const inserted = await execute('INSERT INTO projects (title, misc, leader_id, created_by) VALUES (?, ?, ?, ?)', [
+      title,
+      misc,
+      leaderId,
+      leaderId,
+    ]);
     await query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
-      result.insertId,
+      inserted.insertId,
       leaderId,
       'leader',
     ]);
   }
 
-  const members = [
+  const members: Array<[number, string, string]> = [
     [1, sub(1), 'participant'],
     [1, sub(2), 'participant'],
     [2, sub(3), 'participant'],
@@ -83,14 +91,10 @@ async function seed() {
     [4, sub(5), 'participant'],
   ];
   for (const [projectId, userId, role] of members) {
-    await query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
-      projectId,
-      userId,
-      role,
-    ]);
+    await query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [projectId, userId, role]);
   }
 
-  const applies = [
+  const applies: Array<[number, string, string, string, string]> = [
     [1, sub(3), 'participant', 'waiting', '做过两个 Vue 项目，想参与前端。'],
     [2, sub(4), 'participant', 'waiting', '有空余时间，负责测试与文档。'],
     [3, sub(5), 'participant', 'rejected', '时间冲突，先撤了。'],
@@ -105,7 +109,7 @@ async function seed() {
     );
   }
 
-  const demands = [
+  const demands: Array<[number, string, string | null, string | null, string]> = [
     [1, '需求详情页支持 Markdown 渲染', '详情页目前是纯文本，需要支持代码块与表格。', sub(1), 'accepted'],
     [1, '需求列表增加按状态筛选', null, null, 'waiting'],
     [2, '导入课程大纲生成目录', '需要解析 PDF 大纲。', null, 'waiting'],

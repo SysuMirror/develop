@@ -1,22 +1,27 @@
 import 'dotenv/config';
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as auth from './auth.js';
-import { parseCookies, wrap } from './http.js';
-import { pool } from './db.js';
-import { startQualSyncWorker } from './qual-sync.js';
-import appliesRouter from './routes/applies.js';
-import demandsRouter from './routes/demands.js';
-import usersRouter from './routes/users.js';
-import joinRouter from './routes/join.js';
-import projectsRouter from './routes/projects.js';
+import * as auth from './auth.ts';
+import { parseCookies, wrap } from './http.ts';
+import { pool } from './db.ts';
+import { startQualSyncWorker } from './qual-sync.ts';
+import appliesRouter from './routes/applies.ts';
+import demandsRouter from './routes/demands.ts';
+import usersRouter from './routes/users.ts';
+import joinRouter from './routes/join.ts';
+import projectsRouter from './routes/projects.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.resolve(here, '../../web/dist');
 
-export function createApp() {
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function createApp(): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);
@@ -28,20 +33,23 @@ export function createApp() {
   // Express 4 不会捕获 async 处理器的 rejection，未包裹的失败会直接让进程退出。
   app.use(wrap(auth.attachSession));
 
-  app.get('/api/health', async (_req, res) => {
-    try {
-      await pool.query('SELECT 1');
-      res.json({
-        ok: true,
-        db: 'up',
-        sso: auth.ssoConfigured(),
-        devLogin: auth.devLoginEnabled(),
-        developerGate: true,
-      });
-    } catch (error) {
-      res.status(503).json({ ok: false, db: 'down', message: error.message });
-    }
-  });
+  app.get(
+    '/api/health',
+    wrap(async (_req, res) => {
+      try {
+        await pool.query('SELECT 1');
+        res.json({
+          ok: true,
+          db: 'up',
+          sso: auth.ssoConfigured(),
+          devLogin: auth.devLoginEnabled(),
+          developerGate: true,
+        });
+      } catch (error) {
+        res.status(503).json({ ok: false, db: 'down', message: messageOf(error) });
+      }
+    }),
+  );
 
   app.get('/api/auth/login', wrap(auth.login));
   app.post('/api/auth/login', wrap(auth.passwordLogin));
@@ -80,13 +88,14 @@ export function createApp() {
     res.type('text/plain').send('前端尚未构建，请先在 web/ 目录运行 npm run build。');
   });
 
-  app.use((err, _req, res, _next) => {
-    const status = Number(err.status) || 500;
-    const code = err.code || (status === 500 ? 'INTERNAL' : 'ERROR');
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status = Number((err as { status?: unknown } | null)?.status) || 500;
+    const rawCode = (err as { code?: unknown } | null)?.code;
+    const code = (typeof rawCode === 'string' && rawCode) || (status === 500 ? 'INTERNAL' : 'ERROR');
     if (status >= 500) {
       console.error('[error]', err);
     }
-    res.status(status).json({ error: { code, message: status >= 500 ? '服务器开小差了' : err.message } });
+    res.status(status).json({ error: { code, message: status >= 500 ? '服务器开小差了' : messageOf(err) } });
   });
 
   return app;

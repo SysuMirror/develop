@@ -1,31 +1,43 @@
 import crypto from 'node:crypto';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 export class ApiError extends Error {
-  constructor(status, code, message) {
+  status: number;
+  code: string;
+
+  constructor(status: number, code: string, message: string) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
     this.code = code;
   }
 }
 
-export const badRequest = (code, message) => new ApiError(400, code, message);
+export const badRequest = (code: string, message: string) => new ApiError(400, code, message);
 export const unauthorized = (message = '请先登录') => new ApiError(401, 'UNAUTHENTICATED', message);
-export const forbidden = (code, message) => new ApiError(403, code, message);
+export const forbidden = (code: string, message: string) => new ApiError(403, code, message);
 export const notFound = (message = '资源不存在') => new ApiError(404, 'NOT_FOUND', message);
-export const conflict = (code, message) => new ApiError(409, code, message);
+export const conflict = (code: string, message: string) => new ApiError(409, code, message);
 
-export const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+export type AsyncHandler = (req: Request, res: Response, next: NextFunction) => unknown;
 
-export function sendJson(res, status, payload) {
+/** Express 4 不会捕获 async 处理器的 rejection，统一包一层把它交给错误中间件。 */
+export const wrap =
+  (fn: AsyncHandler): RequestHandler =>
+  (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+
+export function sendJson(res: Response, status: number, payload: unknown): void {
   res.status(status).json(payload);
 }
 
-export async function readJson(req) {
-  return req.body && typeof req.body === 'object' ? req.body : {};
+export async function readJson(req: Request): Promise<Record<string, unknown>> {
+  return req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
 }
 
-export function parseCookies(header) {
-  const out = {};
+export function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
   if (!header) return out;
   for (const part of header.split(';')) {
     const idx = part.indexOf('=');
@@ -42,7 +54,16 @@ export function parseCookies(header) {
   return out;
 }
 
-export function cookieHeader(name, value, { maxAge, path = '/', httpOnly = true, sameSite = 'Lax', secure = false } = {}) {
+export interface CookieOptions {
+  maxAge?: number;
+  path?: string;
+  httpOnly?: boolean;
+  sameSite?: 'Lax' | 'Strict' | 'None';
+  secure?: boolean;
+}
+
+export function cookieHeader(name: string, value: string, options: CookieOptions = {}): string {
+  const { maxAge, path = '/', httpOnly = true, sameSite = 'Lax', secure = false } = options;
   const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${path}`, `SameSite=${sameSite}`];
   if (httpOnly) parts.push('HttpOnly');
   if (secure) parts.push('Secure');
@@ -50,11 +71,11 @@ export function cookieHeader(name, value, { maxAge, path = '/', httpOnly = true,
   return parts.join('; ');
 }
 
-export function clearCookieHeader(name, path = '/') {
+export function clearCookieHeader(name: string, path = '/'): string {
   return cookieHeader(name, '', { maxAge: 0, path });
 }
 
-export function appOrigin(req) {
+export function appOrigin(req: Request): string {
   const configured = (process.env.APP_ORIGIN || '').replace(/\/+$/, '');
   if (configured) return configured;
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
@@ -63,9 +84,14 @@ export function appOrigin(req) {
 
 // 跳转安全阀：目标只能是本站内部路径，或 allowedOrigins 白名单内的绝对地址。
 // 任何其他值（含 //evil.com、https://evil.com）一律降级到本站首页，避免开放重定向。
-export function redirectSafe(req, res, target, { allowedOrigins = [] } = {}) {
+export function redirectSafe(
+  req: Request,
+  res: Response,
+  target: unknown,
+  { allowedOrigins = [] }: { allowedOrigins?: string[] } = {},
+): void {
   const origin = appOrigin(req);
-  let url;
+  let url: URL;
   try {
     url = new URL(String(target ?? '/'), origin);
   } catch {
@@ -88,16 +114,16 @@ export function redirectSafe(req, res, target, { allowedOrigins = [] } = {}) {
 
 const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('base64url');
 
-function sign(payload) {
+function sign(payload: string): string {
   return crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
 }
 
-export function sealCookieValue(obj) {
+export function sealCookieValue(obj: Record<string, unknown>): string {
   const payload = Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
-export function openCookieValue(value) {
+export function openCookieValue(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'string') return null;
   const idx = value.lastIndexOf('.');
   if (idx < 0) return null;
@@ -108,24 +134,31 @@ export function openCookieValue(value) {
     return null;
   }
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    const parsed: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
   }
 }
 
-export function safeReturnPath(value, fallback = '/') {
+export function safeReturnPath(value: unknown, fallback = '/'): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return fallback;
   return value;
 }
 
-export function parsePaging(req) {
-  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 20));
+export interface Paging {
+  page: number;
+  pageSize: number;
+  offset: number;
+}
+
+export function parsePaging(req: Request): Paging {
+  const page = Math.max(1, Number.parseInt(String(req.query.page ?? ''), 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(String(req.query.pageSize ?? ''), 10) || 20));
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
-export function likeTerm(value) {
+export function likeTerm(value: unknown): string | null {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
   return `%${raw.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
