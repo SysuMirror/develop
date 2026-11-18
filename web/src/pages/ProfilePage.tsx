@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, qs } from '../api.js';
-import { useAuth } from '../auth.jsx';
-import { useApi } from '../hooks.js';
+import type { ReactNode } from 'react';
+import { api, messageOf, qs } from '../api';
+import { useAuth } from '../auth';
+import { useApi } from '../hooks';
 import {
   APPLY_STATUS,
   APPLY_TYPE,
@@ -15,21 +16,22 @@ import {
   TimeAgo,
   displayName,
   useToast,
-} from '../ui.jsx';
+} from '../ui';
+import type { ApplyItem, Paged, ProjectSummary } from '../types';
 
 export default function ProfilePage() {
   const { user } = useAuth();
   const { push } = useToast();
-  const mine = useApi('/applies/mine');
-  const inbox = useApi('/applies/inbox');
-  const projects = useApi(`/projects${qs({ filter: 'all', pageSize: 50 })}`);
+  const mine = useApi<{ items: ApplyItem[] }>('/applies/mine');
+  const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
+  const projects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'all', pageSize: 50 })}`);
   const [busy, setBusy] = useState(false);
 
   const myProjects = (projects.data?.items ?? []).filter((project) => project.myRole);
   const inboxItems = inbox.data?.items ?? [];
   const myApplies = mine.data?.items ?? [];
 
-  async function act(path, method, okMessage) {
+  async function act(path: string, method: 'POST' | 'DELETE', okMessage: string) {
     setBusy(true);
     try {
       if (method === 'DELETE') await api.del(path);
@@ -39,13 +41,13 @@ export default function ProfilePage() {
       inbox.reload();
       projects.reload();
     } catch (error) {
-      push(error.message, 'error');
+      push(messageOf(error), 'error');
     } finally {
       setBusy(false);
     }
   }
 
-  let inboxBlock;
+  let inboxBlock: ReactNode;
   if (inbox.loading) {
     inboxBlock = <Skeleton rows={2} />;
   } else if (inboxItems.length === 0) {
@@ -106,7 +108,7 @@ export default function ProfilePage() {
     );
   }
 
-  let mineBlock;
+  let mineBlock: ReactNode;
   if (mine.loading) {
     mineBlock = <Skeleton rows={2} />;
   } else if (myApplies.length === 0) {
@@ -161,7 +163,7 @@ export default function ProfilePage() {
     );
   }
 
-  let projectsBlock;
+  let projectsBlock: ReactNode;
   if (projects.loading) {
     projectsBlock = <Skeleton rows={2} />;
   } else if (myProjects.length === 0) {
@@ -195,10 +197,10 @@ export default function ProfilePage() {
           <p className="page-sub">你发出的申请、等你审批的申请，以及你参与的项目。</p>
         </div>
         <div className="row">
-          <Avatar name={displayName(user)} src={user.avatar} size="lg" />
+          <Avatar name={displayName(user)} src={user?.avatar} size="lg" />
           <div>
             <div style={{ fontWeight: 700 }}>{displayName(user)}</div>
-            <div className="faint">{user.email || '未提供邮箱'}</div>
+            <div className="faint">{user?.email || '未提供邮箱'}</div>
           </div>
         </div>
       </div>

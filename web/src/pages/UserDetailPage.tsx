@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { useApi } from '../hooks.js';
+import { useApi } from '../hooks';
 import {
   APPLY_STATUS,
   APPLY_TYPE,
@@ -12,14 +12,19 @@ import {
   StatusBadge,
   TimeAgo,
   displayName,
-} from '../ui.jsx';
+} from '../ui';
+import type { UserDetail } from '../types';
 
 // developer 为 null 说明资料只来自缓存，UniSSO 的资格字段还没拿到。
-const QUALIFICATION_LABEL = { true: '开发者', false: '未获得开发者资格', null: '资格未知' };
+const QUALIFICATION_LABEL: Record<'true' | 'false' | 'null', string> = {
+  true: '开发者',
+  false: '未获得开发者资格',
+  null: '资格未知',
+};
 
 export default function UserDetailPage() {
-  const { id } = useParams();
-  const { data, loading, error } = useApi(`/users/${id}`);
+  const { id } = useParams<{ id: string }>();
+  const { data, loading, error } = useApi<UserDetail>(`/users/${id}`);
 
   if (loading) {
     return (
@@ -35,6 +40,7 @@ export default function UserDetailPage() {
       </div>
     );
   }
+  if (!data) return null;
 
   return (
     <div>
@@ -48,7 +54,7 @@ export default function UserDetailPage() {
           <div>
             <div className="row" style={{ gap: 8 }}>
               <h1 className="page-title">{displayName(data)}</h1>
-              <Badge tone={data.developer ? 'green' : 'gray'}>{QUALIFICATION_LABEL[data.developer]}</Badge>
+              <Badge tone={data.developer ? 'green' : 'gray'}>{QUALIFICATION_LABEL[String(data.developer) as 'true' | 'false' | 'null']}</Badge>
             </div>
             <p className="page-sub" style={{ marginTop: 2 }}>
               {data.email || '未提供邮箱'}

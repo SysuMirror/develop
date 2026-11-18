@@ -1,5 +1,13 @@
+export interface ApiErrorOptions {
+  status?: number;
+  code?: string;
+}
+
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'ERROR' } = {}) {
+  status: number;
+  code: string;
+
+  constructor(message: string, { status = 0, code = 'ERROR' }: ApiErrorOptions = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -8,7 +16,7 @@ export class ApiError extends Error {
 }
 
 // 与 server/src/auth.js 的错误码保持一致，给用户可操作的文案。
-const ERROR_TEXT = {
+const ERROR_TEXT: Record<string, string> = {
   NOT_DEVELOPER: '尚未获得开发者资格',
   INVALID_CREDENTIALS: '邮箱或密码错误',
   PASSWORD_LOGIN_FORBIDDEN: '该应用未开启邮箱密码登录',
@@ -21,7 +29,13 @@ const ERROR_TEXT = {
   SSO_BAD_PROFILE: '统一身份返回的用户信息不完整',
 };
 
-export function qs(params = {}) {
+export function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export type QueryParams = Record<string, string | number | boolean | null | undefined>;
+
+export function qs(params: QueryParams = {}): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;
@@ -31,8 +45,17 @@ export function qs(params = {}) {
   return text ? `?${text}` : '';
 }
 
-async function request(path, { method = 'GET', body } = {}) {
-  let res;
+interface RequestOptions {
+  method?: string;
+  body?: unknown;
+}
+
+interface ErrorBody {
+  error?: { code?: string; message?: string };
+}
+
+async function request<T>(path: string, { method = 'GET', body }: RequestOptions = {}): Promise<T> {
+  let res: Response;
   try {
     res = await fetch(`/api${path}`, {
       method,
@@ -44,7 +67,7 @@ async function request(path, { method = 'GET', body } = {}) {
     throw new ApiError('网络异常，请检查连接后重试', { code: 'NETWORK' });
   }
   const text = await res.text();
-  let data = null;
+  let data: unknown = null;
   if (text) {
     try {
       data = JSON.parse(text);
@@ -53,23 +76,24 @@ async function request(path, { method = 'GET', body } = {}) {
     }
   }
   if (!res.ok) {
-    const code = data?.error?.code || 'HTTP_' + res.status;
-    throw new ApiError(ERROR_TEXT[code] || data?.error?.message || `请求失败（HTTP ${res.status}）`, {
+    const payload = data as ErrorBody | null;
+    const code = payload?.error?.code || `HTTP_${res.status}`;
+    throw new ApiError(ERROR_TEXT[code] || payload?.error?.message || `请求失败（HTTP ${res.status}）`, {
       status: res.status,
       code,
     });
   }
-  return data;
+  return data as T;
 }
 
 export const api = {
-  get: (path) => request(path),
-  post: (path, body) => request(path, { method: 'POST', body: body ?? {} }),
-  patch: (path, body) => request(path, { method: 'PATCH', body: body ?? {} }),
-  del: (path) => request(path, { method: 'DELETE' }),
+  get: <T>(path: string) => request<T>(path),
+  post: <T = { ok: boolean }>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body: body ?? {} }),
+  patch: <T = { ok: boolean }>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body: body ?? {} }),
+  del: <T = { ok: boolean }>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
-export function formatTime(value) {
+export function formatTime(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';

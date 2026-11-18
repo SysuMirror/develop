@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../api.js';
-import { useAuth } from '../auth.jsx';
-import { useApi } from '../hooks.js';
+import type { ReactNode } from 'react';
+import { api, messageOf } from '../api';
+import { useAuth } from '../auth';
+import { useApi } from '../hooks';
 import {
   APPLY_TYPE,
   DEMAND_STATUS,
@@ -17,21 +18,39 @@ import {
   TimeAgo,
   displayName,
   useToast,
-} from '../ui.jsx';
+} from '../ui';
+import type { ApplyItem, ApplyType, ProjectDemand, ProjectDetail } from '../types';
+
+type DialogKind = 'apply' | 'edit' | 'demand' | 'quit' | 'release';
+
+interface ApplyForm {
+  type: ApplyType;
+  note: string | null;
+}
+
+interface EditForm {
+  title: string;
+  misc: string;
+}
+
+interface DemandForm {
+  title: string;
+  detail: string | null;
+}
 
 export default function ProjectDetailPage() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { push } = useToast();
-  const project = useApi(`/projects/${id}`);
-  const inbox = useApi('/applies/inbox');
+  const project = useApi<ProjectDetail>(`/projects/${id}`);
+  const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState(null);
+  const [dialog, setDialog] = useState<{ kind: DialogKind } | null>(null);
 
   const data = project.data;
   const applyItems = (inbox.data?.items ?? []).filter((item) => String(item.project.id) === String(id));
 
-  const run = async (fn, okMessage) => {
+  const run = async (fn: () => Promise<unknown>, okMessage?: string) => {
     setBusy(true);
     try {
       await fn();
@@ -40,7 +59,7 @@ export default function ProjectDetailPage() {
       project.reload();
       inbox.reload();
     } catch (error) {
-      push(error.message, 'error');
+      push(messageOf(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -60,12 +79,44 @@ export default function ProjectDetailPage() {
       </div>
     );
   }
+  if (!data) return null;
 
   const permissions = data.permissions;
   const leader = data.leader;
   const isLeader = permissions.isLeader;
   const isMember = permissions.isMember;
   const canAcceptApply = isLeader || leader === null;
+  const myId = user?.id;
+
+  function renderDemandAction(demand: ProjectDemand): ReactNode {
+    // 项目详情的需求没有 creator 字段（只有 assignee），所以待接单的需求一律给出按钮：
+    // 服务端会拦住自己接自己发布的那种请求。
+    if (demand.status === 'waiting') {
+      return (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy}
+          onClick={() => run(() => api.post(`/demands/${demand.id}/accept`), '已接单')}
+        >
+          接单
+        </button>
+      );
+    }
+    if (demand.status === 'accepted' && (demand.assignee?.id === myId || isLeader)) {
+      return (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy}
+          onClick={() => run(() => api.post(`/demands/${demand.id}/complete`), '已标记完成')}
+        >
+          标记完成
+        </button>
+      );
+    }
+    return null;
+  }
 
   return (
     <div>
@@ -151,7 +202,7 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
               <StatusBadge map={ROLE} value={member.role} />
-              {isLeader && member.userId !== user.id ? (
+              {isLeader && member.userId !== myId ? (
                 <div className="row" style={{ gap: 4 }}>
                   <button
                     type="button"
@@ -205,12 +256,7 @@ export default function ProjectDetailPage() {
                         {apply.resumeUrl ? (
                           <>
                             {' · '}
-                            <a
-                              className="btn-link"
-                              href={apply.resumeUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
+                            <a className="btn-link" href={apply.resumeUrl} target="_blank" rel="noreferrer">
                               下载简历
                             </a>
                           </>
@@ -262,27 +308,7 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6 }}>
-                  {demand.status === 'waiting' && demand.creator?.id !== user.id ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={busy}
-                      onClick={() => run(() => api.post(`/demands/${demand.id}/accept`), '已接单')}
-                    >
-                      接单
-                    </button>
-                  ) : null}
-                  {demand.status === 'accepted' &&
-                  (demand.assignee?.id === user.id || demand.creator?.id === user.id || isLeader) ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={busy}
-                      onClick={() => run(() => api.post(`/demands/${demand.id}/complete`), '已标记完成')}
-                    >
-                      标记完成
-                    </button>
-                  ) : null}
+                  {renderDemandAction(demand)}
                 </div>
               </div>
             ))}
@@ -360,8 +386,16 @@ export default function ProjectDetailPage() {
   );
 }
 
-function ApplyDialog({ open, onClose, onSubmit, busy, leaderMissing }) {
-  const [type, setType] = useState(leaderMissing ? 'leader' : 'participant');
+interface ApplyDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (form: ApplyForm) => void;
+  busy: boolean;
+  leaderMissing: boolean;
+}
+
+function ApplyDialog({ open, onClose, onSubmit, busy, leaderMissing }: ApplyDialogProps) {
+  const [type, setType] = useState<ApplyType>(leaderMissing ? 'leader' : 'participant');
   const [note, setNote] = useState('');
   return (
     <Modal
@@ -386,7 +420,7 @@ function ApplyDialog({ open, onClose, onSubmit, busy, leaderMissing }) {
       }
     >
       <Field label="申请类型">
-        <select className="select" value={type} onChange={(event) => setType(event.target.value)}>
+        <select className="select" value={type} onChange={(event) => setType(event.target.value as ApplyType)}>
           <option value="participant">成员</option>
           {leaderMissing ? <option value="leader">Leader（项目当前空缺）</option> : null}
         </select>
@@ -398,7 +432,15 @@ function ApplyDialog({ open, onClose, onSubmit, busy, leaderMissing }) {
   );
 }
 
-function EditDialog({ open, onClose, onSubmit, busy, initial }) {
+interface EditDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (form: EditForm) => void;
+  busy: boolean;
+  initial: EditForm;
+}
+
+function EditDialog({ open, onClose, onSubmit, busy, initial }: EditDialogProps) {
   const [form, setForm] = useState(initial);
   return (
     <Modal
@@ -426,7 +468,14 @@ function EditDialog({ open, onClose, onSubmit, busy, initial }) {
   );
 }
 
-function DemandDialog({ open, onClose, onSubmit, busy }) {
+interface DemandDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (form: DemandForm) => void;
+  busy: boolean;
+}
+
+function DemandDialog({ open, onClose, onSubmit, busy }: DemandDialogProps) {
   const [form, setForm] = useState({ title: '', detail: '' });
   return (
     <Modal

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../api.js';
-import { useAuth } from '../auth.jsx';
-import { Avatar, Field, Skeleton } from '../ui.jsx';
+import type { FormEvent } from 'react';
+import { api, messageOf } from '../api';
+import { useAuth } from '../auth';
+import { Avatar, Field, Skeleton } from '../ui';
+import type { DevIdentity } from '../types';
 
-function safeTarget(value) {
+function safeTarget(value: string | null): string {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return '/';
   return value;
 }
@@ -13,7 +15,7 @@ export default function LoginPage() {
   const { user, loading, loginWithDev, loginWithPassword, loginUrl } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const [identities, setIdentities] = useState(null);
+  const [identities, setIdentities] = useState<DevIdentity[] | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -26,12 +28,12 @@ export default function LoginPage() {
 
   useEffect(() => {
     api
-      .get('/auth/dev/identities')
+      .get<{ items: DevIdentity[] }>('/auth/dev/identities')
       .then((data) => setIdentities(data.items ?? []))
       .catch(() => setIdentities([]));
   }, []);
 
-  async function submit(event) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setBusy(true);
@@ -39,19 +41,19 @@ export default function LoginPage() {
       await loginWithPassword(email.trim(), password);
       navigate(target, { replace: true });
     } catch (err) {
-      setError(err.message);
+      setError(messageOf(err));
     } finally {
       setBusy(false);
     }
   }
 
-  async function pick(userId) {
+  async function pick(userId: string) {
     setError('');
     try {
       await loginWithDev(userId);
       navigate(target, { replace: true });
     } catch (err) {
-      setError(err.message);
+      setError(messageOf(err));
     }
   }
 
@@ -76,7 +78,6 @@ export default function LoginPage() {
               onChange={(event) => setEmail(event.target.value)}
               placeholder="name@example.com"
               required
-              autoFocus
             />
           </Field>
           <Field label="密码">

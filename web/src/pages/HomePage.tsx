@@ -1,8 +1,16 @@
 import { Link } from 'react-router-dom';
-import { useApi } from '../hooks.js';
-import { Badge, Empty, ROLE, Skeleton, StatusBadge, APPLY_STATUS, DEMAND_STATUS, TimeAgo, Avatar, displayName } from '../ui.jsx';
+import type { ReactNode } from 'react';
+import { useApi } from '../hooks';
+import { Badge, Empty, ROLE, Skeleton, StatusBadge, APPLY_STATUS, DEMAND_STATUS, TimeAgo, Avatar, displayName } from '../ui';
+import type { ApplyItem, DemandItem, Paged, ProjectSummary, UserListItem } from '../types';
 
-function Stat({ label, value, hint }) {
+interface StatProps {
+  label: string;
+  value?: ReactNode;
+  hint?: ReactNode;
+}
+
+function Stat({ label, value, hint }: StatProps) {
   return (
     <div className="stat-card">
       <div className="stat-card__label">{label}</div>
@@ -13,15 +21,15 @@ function Stat({ label, value, hint }) {
 }
 
 export default function HomePage() {
-  const users = useApi('/users?pageSize=1');
-  const projects = useApi('/projects?pageSize=6');
-  const inbox = useApi('/applies/inbox');
-  const waitingDemands = useApi('/demands?status=waiting&pageSize=1');
+  const users = useApi<Paged<UserListItem>>('/users?pageSize=1');
+  const projects = useApi<Paged<ProjectSummary>>('/projects?pageSize=6');
+  const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
+  const waitingDemands = useApi<Paged<DemandItem>>('/demands?status=waiting&pageSize=1');
 
   const inboxItems = inbox.data?.items ?? [];
   const recent = projects.data?.items ?? [];
 
-  let recentBlock;
+  let recentBlock: ReactNode;
   if (projects.loading) {
     recentBlock = <Skeleton rows={3} />;
   } else if (recent.length === 0) {
@@ -51,7 +59,7 @@ export default function HomePage() {
     );
   }
 
-  let inboxBlock;
+  let inboxBlock: ReactNode;
   if (inbox.loading) {
     inboxBlock = <Skeleton rows={2} />;
   } else if (inboxItems.length === 0) {

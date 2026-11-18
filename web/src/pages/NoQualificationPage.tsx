@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useAuth } from '../auth.jsx';
+import { useAuth } from '../auth';
+import { messageOf } from '../api';
 
 const JOIN_URL = 'https://join.ssemarket.cn';
 
@@ -15,7 +16,7 @@ export default function NoQualificationPage() {
     try {
       await refresh();
     } catch (err) {
-      setError(err.message);
+      setError(messageOf(err));
     } finally {
       setChecking(false);
     }
@@ -37,11 +38,11 @@ export default function NoQualificationPage() {
             : '认证入口在 SSE 集市（join.ssemarket.cn），用同一个统一身份登录后提交开发者认证。'}
         </p>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-          {!unknown ? (
+          {unknown ? null : (
             <a className="btn btn-primary" href={JOIN_URL} target="_blank" rel="noreferrer">
               前往集市认证
             </a>
-          ) : null}
+          )}
           <button type="button" className="btn" onClick={recheck} disabled={checking}>
             {checking ? '检查中…' : '重新检查'}
           </button>

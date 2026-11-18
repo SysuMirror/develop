@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, qs } from '../api.js';
-import { useAuth } from '../auth.jsx';
-import { useApi, useDebounced } from '../hooks.js';
-import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName, useToast } from '../ui.jsx';
+import type { ReactNode } from 'react';
+import { api, messageOf, qs } from '../api';
+import { useAuth } from '../auth';
+import { useApi, useDebounced } from '../hooks';
+import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName, useToast } from '../ui';
+import type { DemandItem, Paged } from '../types';
 
-const TABS = [
+interface TabItem {
+  key: string;
+  label: string;
+}
+
+const TABS: TabItem[] = [
   { key: '', label: '全部' },
   { key: 'waiting', label: '待接单' },
   { key: 'accepted', label: '进行中' },
@@ -21,23 +28,53 @@ export default function DemandsPage() {
   const [busy, setBusy] = useState(false);
   const q = useDebounced(term);
   const pageSize = 15;
-  const { data, loading, error, reload } = useApi(`/demands${qs({ status, q, page, pageSize })}`);
+  const { data, loading, error, reload } = useApi<Paged<DemandItem>>(`/demands${qs({ status, q, page, pageSize })}`);
   const items = data?.items ?? [];
+  const myId = user?.id;
 
-  async function act(path, okMessage) {
+  async function act(path: string, okMessage: string) {
     setBusy(true);
     try {
       await api.post(path);
       push(okMessage, 'success');
       reload();
     } catch (err) {
-      push(err.message, 'error');
+      push(messageOf(err), 'error');
     } finally {
       setBusy(false);
     }
   }
 
-  let content;
+  function renderAction(demand: DemandItem): ReactNode {
+    if (demand.status === 'waiting') {
+      if (demand.creator?.id === myId) return <span className="faint">—</span>;
+      return (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy}
+          onClick={() => act(`/demands/${demand.id}/accept`, '已接单')}
+        >
+          接单
+        </button>
+      );
+    }
+    if (demand.status === 'accepted' && (demand.assignee?.id === myId || demand.creator?.id === myId)) {
+      return (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy}
+          onClick={() => act(`/demands/${demand.id}/complete`, '已标记完成')}
+        >
+          完成
+        </button>
+      );
+    }
+    return <span className="faint">—</span>;
+  }
+
+  let content: ReactNode;
   if (loading) {
     content = <Skeleton rows={5} />;
   } else if (error) {
@@ -80,30 +117,7 @@ export default function DemandsPage() {
                     <TimeAgo value={demand.createdAt} />
                   </div>
                 </td>
-                <td className="right">
-                  {demand.status === 'waiting' && demand.creator?.id !== user.id ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={busy}
-                      onClick={() => act(`/demands/${demand.id}/accept`, '已接单')}
-                    >
-                      接单
-                    </button>
-                  ) : demand.status === 'accepted' &&
-                    (demand.assignee?.id === user.id || demand.creator?.id === user.id) ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={busy}
-                      onClick={() => act(`/demands/${demand.id}/complete`, '已标记完成')}
-                    >
-                      完成
-                    </button>
-                  ) : (
-                    <span className="faint">—</span>
-                  )}
-                </td>
+                <td className="right">{renderAction(demand)}</td>
               </tr>
             ))}
           </tbody>

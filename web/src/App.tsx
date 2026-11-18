@@ -1,17 +1,24 @@
 import { NavLink, Outlet, Route, Routes, Link, Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from './auth.jsx';
-import { Avatar, Skeleton, displayName } from './ui.jsx';
-import HomePage from './pages/HomePage.jsx';
-import ProjectsPage from './pages/ProjectsPage.jsx';
-import ProjectDetailPage from './pages/ProjectDetailPage.jsx';
-import UsersPage from './pages/UsersPage.jsx';
-import UserDetailPage from './pages/UserDetailPage.jsx';
-import DemandsPage from './pages/DemandsPage.jsx';
-import ProfilePage from './pages/ProfilePage.jsx';
-import LoginPage from './pages/LoginPage.jsx';
-import NoQualificationPage from './pages/NoQualificationPage.jsx';
+import type { ReactNode } from 'react';
+import { useAuth } from './auth';
+import { Avatar, Skeleton, displayName } from './ui';
+import HomePage from './pages/HomePage';
+import ProjectsPage from './pages/ProjectsPage';
+import ProjectDetailPage from './pages/ProjectDetailPage';
+import UsersPage from './pages/UsersPage';
+import UserDetailPage from './pages/UserDetailPage';
+import DemandsPage from './pages/DemandsPage';
+import ProfilePage from './pages/ProfilePage';
+import LoginPage from './pages/LoginPage';
+import NoQualificationPage from './pages/NoQualificationPage';
 
-const NAV = [
+interface NavItem {
+  to: string;
+  label: string;
+  end?: boolean;
+}
+
+const NAV: NavItem[] = [
   { to: '/', label: '概览', end: true },
   { to: '/projects', label: '项目' },
   { to: '/users', label: '用户' },
@@ -78,7 +85,7 @@ function Layout() {
   );
 }
 
-function RequireAuth({ children }) {
+function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) {
@@ -94,7 +101,7 @@ function RequireAuth({ children }) {
   }
   // 服务端已按资格拦截业务接口，这里只负责给出可操作的提示页。
   if (user.developer !== true) return <NoQualificationPage />;
-  return children;
+  return <>{children}</>;
 }
 
 export default function App() {

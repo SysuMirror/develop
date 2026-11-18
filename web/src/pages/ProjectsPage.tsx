@@ -1,17 +1,25 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, qs } from '../api.js';
-import { useApi, useDebounced } from '../hooks.js';
-import { APPLY_STATUS, ROLE, Badge, Empty, Field, Modal, Pager, Skeleton, StatusBadge, TimeAgo, useToast } from '../ui.jsx';
+import type { ReactNode } from 'react';
+import { api, qs } from '../api';
+import { useApi, useDebounced } from '../hooks';
+import { APPLY_STATUS, ROLE, Badge, Empty, Field, Modal, Pager, Skeleton, StatusBadge, TimeAgo, useToast } from '../ui';
+import { messageOf } from '../api';
+import type { Paged, ProjectSummary } from '../types';
 
-const FILTERS = [
+interface FilterItem {
+  key: string;
+  label: string;
+}
+
+const FILTERS: FilterItem[] = [
   { key: 'all', label: '全部' },
   { key: 'mine-leader', label: '我领导的' },
   { key: 'mine-member', label: '我参与的' },
   { key: 'recruiting', label: '招募中' },
 ];
 
-function statusCell(project) {
+function statusCell(project: ProjectSummary) {
   if (project.myRole) return <StatusBadge map={ROLE} value={project.myRole} />;
   if (project.myApplyStatus) return <StatusBadge map={APPLY_STATUS} value={project.myApplyStatus} />;
   return <span className="faint">—</span>;
@@ -29,7 +37,7 @@ export default function ProjectsPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const pageSize = 12;
-  const { data, loading, error } = useApi(`/projects${qs({ filter, q, page, pageSize })}`);
+  const { data, loading, error } = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter, q, page, pageSize })}`);
   const items = data?.items ?? [];
 
   async function submitCreate() {
@@ -39,18 +47,18 @@ export default function ProjectsPage() {
     }
     setSubmitting(true);
     try {
-      const created = await api.post('/projects', { title: form.title.trim(), misc: form.misc.trim() || null });
+      const created = await api.post<{ id: number }>('/projects', { title: form.title.trim(), misc: form.misc.trim() || null });
       push('项目已创建', 'success');
       setCreating(false);
       navigate(`/projects/${created.id}`);
     } catch (err) {
-      push(err.message, 'error');
+      push(messageOf(err), 'error');
     } finally {
       setSubmitting(false);
     }
   }
 
-  let content;
+  let content: ReactNode;
   if (loading) {
     content = <Skeleton rows={5} />;
   } else if (error) {

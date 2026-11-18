@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { qs } from '../api.js';
-import { useApi, useDebounced } from '../hooks.js';
-import { Avatar, Empty, Pager, Skeleton, displayName } from '../ui.jsx';
+import type { ReactNode } from 'react';
+import { qs } from '../api';
+import { useApi, useDebounced } from '../hooks';
+import { Avatar, Empty, Pager, Skeleton, displayName } from '../ui';
+import type { UserListPage } from '../types';
 
 export default function UsersPage() {
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const q = useDebounced(term);
   const pageSize = 20;
-  const { data, loading, error } = useApi(`/users${qs({ q, page, pageSize })}`);
+  const { data, loading, error } = useApi<UserListPage>(`/users${qs({ q, page, pageSize })}`);
   const items = data?.items ?? [];
 
-  let content;
+  let content: ReactNode;
   if (loading) {
     content = <Skeleton rows={5} />;
   } else if (error) {
