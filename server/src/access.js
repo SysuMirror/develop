@@ -9,8 +9,8 @@ export async function loadProject(projectId) {
   return project;
 }
 
-export async function loadMembership(projectId, developerId) {
-  return one('SELECT * FROM project_member WHERE project_id = ? AND developer_id = ?', [projectId, developerId]);
+export async function loadMembership(projectId, userId) {
+  return one('SELECT * FROM project_member WHERE project_id = ? AND user_id = ?', [projectId, userId]);
 }
 
 export async function requireLeader(project, user) {

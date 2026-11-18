@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { one, withTx } from '../db.js';
+import { lookup } from '../directory.js';
 import { ApiError, badRequest, conflict, wrap } from '../http.js';
 
 const router = Router();
@@ -39,7 +40,8 @@ router.use((req, res, next) => {
 
 function parseSsoSub(value) {
   const sub = String(value ?? '').trim();
-  if (!sub || sub.length > 64) throw badRequest('BAD_SSO_SUB', 'ssoSub 必填，且不超过 64 字符');
+  // sub 就是 UniSSO users.id，定长 36；本地表也只用 36 存。
+  if (!sub || sub.length > 36) throw badRequest('BAD_SSO_SUB', 'ssoSub 必填，且不超过 36 字符');
   return sub;
 }
 
@@ -77,42 +79,12 @@ function parseNote(value) {
   return note || null;
 }
 
-function parseName(value) {
-  const name = String(value ?? '').trim();
-  if (!name) return '开发者';
-  if (name.length > 64) throw badRequest('BAD_NAME', 'name 不能超过 64 字符');
-  return name;
-}
-
-function parseEmail(value) {
-  const email = String(value ?? '').trim();
-  if (!email) return null;
-  if (email.length > 128) throw badRequest('BAD_EMAIL', 'email 不能超过 128 字符');
-  return email;
-}
-
-// join 只传 SSO sub；开发者尚未在本平台登录过时，先建一条最小记录。
-async function ensureDeveloper(ssoSub, name, email) {
-  const existing = await one('SELECT id FROM developers WHERE sso_sub = ?', [ssoSub]);
-  if (existing) return existing.id;
-  try {
-    const result = await withTx(async (conn) => {
-      const [rows] = await conn.query('SELECT id FROM developers WHERE sso_sub = ?', [ssoSub]);
-      if (rows.length > 0) return rows[0].id;
-      const [inserted] = await conn.query('INSERT INTO developers (sso_sub, name, email) VALUES (?, ?, ?)', [
-        ssoSub,
-        name,
-        email,
-      ]);
-      return inserted.insertId;
-    });
-    return result;
-  } catch (error) {
-    if (error?.code !== 'ER_DUP_ENTRY') throw error;
-    const raced = await one('SELECT id FROM developers WHERE sso_sub = ?', [ssoSub]);
-    if (!raced) throw error;
-    return raced.id;
-  }
+// 用户实体在 UniSSO：这里只确认目录里确实有这个人，不往本地写任何用户记录。
+// 目录不可用时 known 为 null，不做拦截（否则 SSO 抖动会让整个接入不可用）。
+async function ensureUser(ssoSub) {
+  const { known } = await lookup(ssoSub);
+  if (known === false) throw new ApiError(404, 'USER_NOT_FOUND', 'UniSSO 中不存在该用户');
+  return ssoSub;
 }
 
 async function loadProject(projectId) {
@@ -121,11 +93,11 @@ async function loadProject(projectId) {
   return project;
 }
 
-function submitApply(projectId, developerId, resumeUrl, note) {
+function submitApply(projectId, userId, resumeUrl, note) {
   return withTx(async (conn) => {
     const [rows] = await conn.query(
-      "SELECT id, status FROM applies WHERE project_id = ? AND developer_id = ? AND type = 'participant' FOR UPDATE",
-      [projectId, developerId],
+      "SELECT id, status FROM applies WHERE project_id = ? AND user_id = ? AND type = 'participant' FOR UPDATE",
+      [projectId, userId],
     );
     const existing = rows[0];
     // 已通过的申请优先返回，join 重试时不会因为已是成员而变成 409。
@@ -134,16 +106,16 @@ function submitApply(projectId, developerId, resumeUrl, note) {
     }
 
     const [memberships] = await conn.query(
-      'SELECT id FROM project_member WHERE project_id = ? AND developer_id = ? LIMIT 1',
-      [projectId, developerId],
+      'SELECT id FROM project_member WHERE project_id = ? AND user_id = ? LIMIT 1',
+      [projectId, userId],
     );
-    if (memberships.length > 0) throw conflict('ALREADY_MEMBER', '该开发者已经是项目成员');
+    if (memberships.length > 0) throw conflict('ALREADY_MEMBER', '该用户已经是项目成员');
 
     if (!existing) {
       const [result] = await conn.query(
-        `INSERT INTO applies (project_id, developer_id, type, status, note, resume_url, source)
+        `INSERT INTO applies (project_id, user_id, type, status, note, resume_url, source)
          VALUES (?, ?, 'participant', 'waiting', ?, ?, 'join')`,
-        [projectId, developerId, note ?? null, resumeUrl],
+        [projectId, userId, note ?? null, resumeUrl],
       );
       return { id: result.insertId, status: 'waiting', duplicate: false, created: true };
     }
@@ -174,25 +146,23 @@ router.post(
     const projectId = parseProjectId(body.projectId);
     const resumeUrl = parseResumeUrl(body.resumeUrl);
     const note = parseNote(body.note);
-    const name = parseName(body.name);
-    const email = parseEmail(body.email);
 
     const project = await loadProject(projectId);
-    const developerId = await ensureDeveloper(ssoSub, name, email);
+    const userId = await ensureUser(ssoSub);
 
     let outcome;
     try {
-      outcome = await submitApply(project.id, developerId, resumeUrl, note);
+      outcome = await submitApply(project.id, userId, resumeUrl, note);
     } catch (error) {
       // 两个并发请求可能同时看不到记录；后插入的那个会撞唯一键，重试一次即可读到已有行。
       if (error?.code !== 'ER_DUP_ENTRY') throw error;
-      outcome = await submitApply(project.id, developerId, resumeUrl, note);
+      outcome = await submitApply(project.id, userId, resumeUrl, note);
     }
 
     res.status(outcome.created ? 201 : 200).json({
       id: outcome.id,
       status: outcome.status,
-      developerId,
+      userId,
       projectId: project.id,
       duplicate: outcome.duplicate,
       ...(outcome.reopened ? { reopened: true } : {}),

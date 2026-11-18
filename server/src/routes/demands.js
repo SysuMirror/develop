@@ -1,21 +1,20 @@
 import { Router } from 'express';
 import { loadProject, requireMember } from '../access.js';
 import { one, query } from '../db.js';
+import { getUsers, userRef } from '../directory.js';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.js';
 
 const router = Router();
 
 const DEMAND_SELECT = `
   SELECT d.id, d.title, d.detail, d.status, d.created_at, d.accepted_at, d.completed_at,
-         d.created_by, c.name AS creator_name,
-         d.developer_id, a.name AS assignee_name, a.avatar AS assignee_avatar,
+         d.created_by,
+         d.user_id,
          d.project_id, p.title AS project_title, p.leader_id
     FROM demands d
-    JOIN projects p ON p.id = d.project_id
-    LEFT JOIN developers c ON c.id = d.created_by
-    LEFT JOIN developers a ON a.id = d.developer_id`;
+    JOIN projects p ON p.id = d.project_id`;
 
-function mapDemand(row) {
+function mapDemand(row, people) {
   return {
     id: row.id,
     title: row.title,
@@ -25,9 +24,14 @@ function mapDemand(row) {
     acceptedAt: row.accepted_at,
     completedAt: row.completed_at,
     project: { id: row.project_id, title: row.project_title },
-    creator: { id: row.created_by, name: row.creator_name },
-    assignee: row.developer_id ? { id: row.developer_id, name: row.assignee_name, avatar: row.assignee_avatar } : null,
+    creator: userRef(row.created_by, people.get(row.created_by)),
+    assignee: row.user_id ? userRef(row.user_id, people.get(row.user_id)) : null,
   };
+}
+
+async function mapDemands(rows) {
+  const people = await getUsers(rows.flatMap((row) => [row.created_by, row.user_id]));
+  return rows.map((row) => mapDemand(row, people));
 }
 
 router.get(
@@ -52,7 +56,7 @@ router.get(
       [...params, pageSize, offset],
     );
     const [{ total }] = await query(`SELECT COUNT(*) AS total FROM demands d ${where}`, params);
-    res.json({ items: rows.map(mapDemand), total: Number(total), page, pageSize });
+    res.json({ items: await mapDemands(rows), total: Number(total), page, pageSize });
   }),
 );
 
@@ -69,7 +73,7 @@ router.post(
       [project.id, title, detail, req.user.id],
     );
     const [created] = await query(`${DEMAND_SELECT} WHERE d.id = ?`, [result.insertId]);
-    res.status(201).json(mapDemand(created));
+    res.status(201).json((await mapDemands([created]))[0]);
   }),
 );
 
@@ -81,11 +85,11 @@ router.post(
     if (demand.status !== 'waiting') throw conflict('NOT_PENDING', '该需求已被接单或已完成');
     if (demand.created_by === req.user.id) throw forbidden('SELF_ACCEPT', '不能接自己发布的需求');
     await query(
-      "UPDATE demands SET status = 'accepted', developer_id = ?, accepted_at = NOW() WHERE id = ? AND status = 'waiting'",
+      "UPDATE demands SET status = 'accepted', user_id = ?, accepted_at = NOW() WHERE id = ? AND status = 'waiting'",
       [req.user.id, demand.id],
     );
     const [updated] = await query(`${DEMAND_SELECT} WHERE d.id = ?`, [demand.id]);
-    res.json(mapDemand(updated));
+    res.json((await mapDemands([updated]))[0]);
   }),
 );
 
@@ -96,11 +100,11 @@ router.post(
     if (!demand) throw notFound('需求不存在');
     if (demand.status !== 'accepted') throw conflict('NOT_PENDING', '只有已接单的需求可以标记完成');
     const allowed =
-      req.user.id === demand.created_by || req.user.id === demand.developer_id || req.user.id === demand.leader_id;
+      req.user.id === demand.created_by || req.user.id === demand.user_id || req.user.id === demand.leader_id;
     if (!allowed) throw forbidden('NOT_ALLOWED', '只有发布者、接单人或项目 leader 可以标记完成');
     await query("UPDATE demands SET status = 'completed', completed_at = NOW() WHERE id = ?", [demand.id]);
     const [updated] = await query(`${DEMAND_SELECT} WHERE d.id = ?`, [demand.id]);
-    res.json(mapDemand(updated));
+    res.json((await mapDemands([updated]))[0]);
   }),
 );
 

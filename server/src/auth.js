@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
 import { one, query } from './db.js';
+import { DEMO_USERS } from './demo-users.js';
+import { getUser } from './directory.js';
+import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.js';
 import {
   ApiError,
   badRequest,
@@ -13,17 +16,14 @@ import {
   unauthorized,
 } from './http.js';
 
-const ISSUER = (process.env.SSO_ISSUER || 'https://sso.ssemarket.cn').replace(/\/+$/, '');
-const CLIENT_ID = process.env.SSO_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.SSO_CLIENT_SECRET || '';
+const { issuer: ISSUER, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET } = ssoCredentials();
 const SCOPE = process.env.SSO_SCOPE || 'openid profile:username profile:name profile:avatar email';
 const SESSION_COOKIE = 'sid';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
 const TX_COOKIE = 'oauth_tx';
 const TX_MAX_AGE = 600;
 
-export const ssoConfigured = () => Boolean(CLIENT_ID && CLIENT_SECRET);
-export const devLoginEnabled = () => process.env.DEV_LOGIN !== '0' && (!ssoConfigured() || process.env.DEV_LOGIN === '1');
+export { devLoginEnabled, ssoConfigured };
 
 // 资格校验缓存：同一 session 在 TTL 内不重复请求 userinfo，撤销延迟上限即该 TTL。
 // TTL 为 0 表示每次请求都校验。
@@ -61,36 +61,19 @@ function isSecure(req) {
   return (req.get('x-forwarded-proto') || req.protocol) === 'https';
 }
 
-async function upsertDeveloper(profile) {
-  const sub = profile.sso_sub || profile.sub;
-  if (!sub) throw new ApiError(502, 'SSO_BAD_PROFILE', 'SSO 未返回 sub');
-  const name = profile.name || profile.preferred_username || profile.email || '开发者';
-  const existing = await one('SELECT id, name FROM developers WHERE sso_sub = ?', [sub]);
-  if (existing) {
-    if (existing.name !== name) {
-      await query('UPDATE developers SET name = ? WHERE id = ?', [name, existing.id]);
-    }
-    return existing.id;
-  }
-  const result = await query(
-    'INSERT INTO developers (sso_sub, name, avatar, email) VALUES (?, ?, ?, ?)',
-    [sub, name, profile.picture || null, profile.email || null],
-  );
-  return result.insertId;
-}
-
 function toMysqlDate(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-export async function createSession(developerId, { accessToken = null, expiresIn = 0 } = {}) {
+// 会话只记 sub（= UniSSO users.id）；昵称头像不落库，展示时再向目录要。
+export async function createSession(userId, { accessToken = null, expiresIn = 0 } = {}) {
   const id = b64url(crypto.randomBytes(32));
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
   const tokenExpiresAt = accessToken && expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null;
   await query(
-    `INSERT INTO sessions (id, developer_id, access_token, access_token_expires_at, expires_at)
+    `INSERT INTO sessions (id, user_id, access_token, access_token_expires_at, expires_at)
      VALUES (?, ?, ?, ?, ?)`,
-    [id, developerId, accessToken, tokenExpiresAt ? toMysqlDate(tokenExpiresAt) : null, toMysqlDate(expires)],
+    [id, userId, accessToken, tokenExpiresAt ? toMysqlDate(tokenExpiresAt) : null, toMysqlDate(expires)],
   );
   return { id, expires };
 }
@@ -119,29 +102,29 @@ export const attachSession = (req, _res, next) => {
     return next();
   }
   one(
-    `SELECT s.id AS session_id, s.expires_at, s.access_token, s.access_token_expires_at,
-            d.id, d.name, d.avatar, d.email, d.sso_sub
-       FROM sessions s JOIN developers d ON d.id = s.developer_id
-      WHERE s.id = ? AND s.expires_at > NOW()`,
+    `SELECT id AS session_id, user_id, expires_at, access_token, access_token_expires_at
+       FROM sessions
+      WHERE id = ? AND expires_at > NOW()`,
     [raw],
   )
-    .then((row) => {
+    .then(async (row) => {
       if (!row) {
         req.user = null;
-        return next();
+        return;
       }
+      // 名字、头像、邮箱来自 UniSSO 目录；目录取不到时为 null，前端显示「未知用户」。
+      const profile = await getUser(row.user_id);
       req.user = {
-        id: row.id,
-        name: row.name,
-        avatar: row.avatar,
-        email: row.email,
-        ssoSub: row.sso_sub,
+        id: row.user_id,
+        name: profile?.name ?? null,
+        avatar: profile?.avatar ?? null,
+        email: profile?.email ?? null,
         sessionId: row.session_id,
         accessToken: row.access_token || null,
         accessTokenExpiresAt: row.access_token_expires_at || null,
       };
-      next();
     })
+    .then(() => next())
     .catch(next);
 };
 
@@ -285,8 +268,9 @@ export const callback = async (req, res) => {
   try {
     const token = await exchangeCode(code, tx.verifier, tx.uri);
     const profile = await fetchUserinfo(token.access_token);
-    const developerId = await upsertDeveloper(profile);
-    const session = await createSession(developerId, {
+    const userId = profile.sso_sub || profile.sub;
+    if (!userId) throw new ApiError(502, 'SSO_BAD_PROFILE', 'SSO 未返回 sub');
+    const session = await createSession(userId, {
       accessToken: token.access_token,
       expiresIn: Number(token.expires_in) || 3600,
     });
@@ -314,7 +298,7 @@ export const me = async (req, res) => {
     name: req.user.name,
     avatar: req.user.avatar,
     email: req.user.email,
-    ssoSub: req.user.ssoSub,
+    ssoSub: req.user.id,
     developer,
     qualification,
     devLogin: devLoginEnabled(),
@@ -328,17 +312,15 @@ export const logout = async (req, res) => {
 };
 export const devIdentities = async (_req, res) => {
   if (!devLoginEnabled()) throw new ApiError(404, 'NOT_FOUND', '开发登录未开启');
-  const rows = await query('SELECT id, name FROM developers ORDER BY id LIMIT 50');
-  res.json({ items: rows });
+  res.json({ items: DEMO_USERS.map(({ id, name }) => ({ id, name })) });
 };
 
 export const devLogin = async (req, res) => {
   if (!devLoginEnabled()) throw new ApiError(404, 'NOT_FOUND', '开发登录未开启');
-  const id = Number(req.body?.developerId);
-  if (!id) throw badRequest('BAD_REQUEST', '缺少 developerId');
-  const row = await one('SELECT id FROM developers WHERE id = ?', [id]);
-  if (!row) throw new ApiError(404, 'NOT_FOUND', '开发者不存在');
-  const session = await createSession(row.id);
+  const userId = String(req.body?.userId ?? req.body?.developerId ?? '').trim();
+  if (!userId) throw badRequest('BAD_REQUEST', '缺少 userId');
+  if (!DEMO_USERS.some((user) => user.id === userId)) throw new ApiError(404, 'NOT_FOUND', '开发者不存在');
+  const session = await createSession(userId);
   res.setHeader('Set-Cookie', sessionCookie(req, session.id, session.expires));
   res.json({ ok: true });
 };

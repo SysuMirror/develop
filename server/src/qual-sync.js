@@ -1,4 +1,4 @@
-import { one, query } from './db.js';
+import { query } from './db.js';
 import { qualificationWriteEnabled, updateDeveloperQualification } from './unisso.js';
 
 // 每个开发者只保留最新目标值；重试同一目标值即可，不需要补偿历史。
@@ -19,37 +19,35 @@ function backoffMs(attempts, retryAfterMs = 0) {
   return Math.max(exponential, retryAfterMs);
 }
 
-export async function enqueueQualification(developerId, ssoSub, targetValue) {
-  if (!ssoSub) return;
+export async function enqueueQualification(userId, targetValue) {
+  if (!userId) return;
   await query(
-    `INSERT INTO developer_qual_sync (developer_id, sso_sub, target_value, status, attempts, last_error, next_attempt_at)
-     VALUES (?, ?, ?, 'pending', 0, NULL, NOW())
+    `INSERT INTO developer_qual_sync (user_id, target_value, status, attempts, last_error, next_attempt_at)
+     VALUES (?, ?, 'pending', 0, NULL, NOW())
      ON DUPLICATE KEY UPDATE
-       sso_sub = VALUES(sso_sub),
        target_value = VALUES(target_value),
        status = 'pending',
        attempts = 0,
        last_error = NULL,
        next_attempt_at = NOW()`,
-    [developerId, ssoSub, targetValue ? 1 : 0],
+    [userId, targetValue ? 1 : 0],
   );
   // 立即尝试一次，不阻塞调用方；失败由下一轮重试。
   void runQualSyncOnce().catch((error) => console.error('[qual-sync]', error.message));
 }
 
 // 被开除 / 退出 / 释放项目后调用：只有确实不再属于任何项目才撤销资格。
-export async function revokeIfNoMembership(developerId) {
-  const [{ n }] = await query('SELECT COUNT(*) AS n FROM project_member WHERE developer_id = ?', [developerId]);
+export async function revokeIfNoMembership(userId) {
+  if (!userId) return false;
+  const [{ n }] = await query('SELECT COUNT(*) AS n FROM project_member WHERE user_id = ?', [userId]);
   if (Number(n) > 0) return false;
-  const developer = await one('SELECT id, sso_sub FROM developers WHERE id = ?', [developerId]);
-  if (!developer) return false;
-  await enqueueQualification(developer.id, developer.sso_sub, false);
+  await enqueueQualification(userId, false);
   return true;
 }
 
 async function pushRow(row) {
   const target = Number(row.target_value) === 1;
-  const result = await updateDeveloperQualification(row.sso_sub, target);
+  const result = await updateDeveloperQualification(row.user_id, target);
   if (result.developer !== target) {
     // 写入成功但读回值不一致（并发写入），按可重试处理，下一轮再写同一目标值。
     const error = new Error(`qualification mismatch: want ${target}, got ${result.developer}`);
@@ -68,7 +66,7 @@ async function markFailure(row, error) {
       String(error.message || error).slice(0, 255),
       row.id,
     ]);
-    console.error(`[qual-sync] developer ${row.developer_id} failed: ${error.message || error}`);
+    console.error(`[qual-sync] user ${row.user_id} failed: ${error.message || error}`);
     return;
   }
   const next = new Date(Date.now() + backoffMs(attempts, error.retryAfterMs || 0));
@@ -92,7 +90,7 @@ export async function runQualSyncOnce() {
   running = true;
   try {
     const rows = await query(
-      `SELECT id, developer_id, sso_sub, target_value, attempts
+      `SELECT id, user_id, target_value, attempts
          FROM developer_qual_sync
         WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
         ORDER BY next_attempt_at, id

@@ -1,15 +1,16 @@
 import { Router } from 'express';
 import { loadMembership, loadProject, requireLeader } from '../access.js';
 import { query, withTx } from '../db.js';
+import { getUsers, userRef } from '../directory.js';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.js';
 import { revokeIfNoMembership } from '../qual-sync.js';
 
 const router = Router();
 
-// 成员关系变更后，不再属于任何项目的开发者撤销 UniSSO 资格；失败不阻塞业务。
-async function syncAfterRemoval(developerId) {
+// 成员关系变更后，不再属于任何项目的用户撤销 UniSSO 资格；失败不阻塞业务。
+async function syncAfterRemoval(userId) {
   try {
-    await revokeIfNoMembership(developerId);
+    await revokeIfNoMembership(userId);
   } catch (error) {
     console.error('[qual-sync] revoke check failed', error.message);
   }
@@ -17,24 +18,22 @@ async function syncAfterRemoval(developerId) {
 
 const PROJECT_SUMMARY = `
   SELECT p.id, p.title, p.misc, p.created_at, p.updated_at, p.leader_id,
-         ld.name AS leader_name, ld.avatar AS leader_avatar,
          (SELECT COUNT(*) FROM project_member m2 WHERE m2.project_id = p.id) AS member_count,
          (SELECT COUNT(*) FROM demands d3 WHERE d3.project_id = p.id AND d3.status = 'waiting') AS waiting_demand_count,
          (SELECT COUNT(*) FROM applies a2 WHERE a2.project_id = p.id AND a2.status = 'waiting') AS pending_apply_count,
-         (SELECT m.role FROM project_member m WHERE m.project_id = p.id AND m.developer_id = ? LIMIT 1) AS my_role,
-         (SELECT a.status FROM applies a WHERE a.project_id = p.id AND a.developer_id = ? AND a.status = 'waiting'
+         (SELECT m.role FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? LIMIT 1) AS my_role,
+         (SELECT a.status FROM applies a WHERE a.project_id = p.id AND a.user_id = ? AND a.status = 'waiting'
            ORDER BY a.id LIMIT 1) AS my_apply_status
-    FROM projects p
-    LEFT JOIN developers ld ON ld.id = p.leader_id`;
+    FROM projects p`;
 
-function mapSummary(row) {
+function mapSummary(row, people) {
   return {
     id: row.id,
     title: row.title,
     misc: row.misc,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    leader: row.leader_id ? { id: row.leader_id, name: row.leader_name, avatar: row.leader_avatar } : null,
+    leader: row.leader_id ? userRef(row.leader_id, people.get(row.leader_id)) : null,
     memberCount: Number(row.member_count),
     waitingDemandCount: Number(row.waiting_demand_count),
     pendingApplyCount: Number(row.pending_apply_count),
@@ -61,7 +60,7 @@ router.get(
       filterParams.push(user.id);
     } else if (filter === 'mine-member') {
       conditions.push(
-        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.developer_id = ? AND m.role = 'participant')",
+        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role = 'participant')",
       );
       filterParams.push(user.id);
     } else if (filter === 'recruiting') {
@@ -75,11 +74,9 @@ router.get(
       pageSize,
       offset,
     ]);
-    const [{ total }] = await query(
-      `SELECT COUNT(*) AS total FROM projects p ${where}`,
-      filterParams,
-    );
-    res.json({ items: rows.map(mapSummary), total: Number(total), page, pageSize });
+    const [{ total }] = await query(`SELECT COUNT(*) AS total FROM projects p ${where}`, filterParams);
+    const people = await getUsers(rows.map((row) => row.leader_id));
+    res.json({ items: rows.map((row) => mapSummary(row, people)), total: Number(total), page, pageSize });
   }),
 );
 
@@ -90,26 +87,27 @@ router.get(
     const user = req.user;
     const [summary] = await query(`${PROJECT_SUMMARY} WHERE p.id = ?`, [user.id, user.id, project.id]);
     const members = await query(
-      `SELECT m.developer_id, m.role, m.created_at, d.name, d.avatar
-         FROM project_member m JOIN developers d ON d.id = m.developer_id
+      `SELECT m.user_id, m.role, m.created_at
+         FROM project_member m
         WHERE m.project_id = ?
         ORDER BY FIELD(m.role, 'leader', 'participant'), m.created_at`,
       [project.id],
     );
     const demands = await query(
-      `SELECT d.id, d.title, d.detail, d.status, d.created_at, d.developer_id, a.name AS assignee_name
-         FROM demands d LEFT JOIN developers a ON a.id = d.developer_id
+      `SELECT d.id, d.title, d.detail, d.status, d.created_at, d.user_id
+         FROM demands d
         WHERE d.project_id = ?
         ORDER BY FIELD(d.status, 'waiting', 'accepted', 'completed'), d.created_at DESC`,
       [project.id],
     );
+    const people = await getUsers([summary.leader_id, ...members.map((row) => row.user_id), ...demands.map((row) => row.user_id)]);
     const membership = await loadMembership(project.id, user.id);
     res.json({
-      ...mapSummary(summary),
+      ...mapSummary(summary, people),
       members: members.map((row) => ({
-        developerId: row.developer_id,
-        name: row.name,
-        avatar: row.avatar,
+        userId: row.user_id,
+        name: people.get(row.user_id)?.name ?? null,
+        avatar: people.get(row.user_id)?.avatar ?? null,
         role: row.role,
         joinedAt: row.created_at,
       })),
@@ -119,7 +117,7 @@ router.get(
         detail: row.detail,
         status: row.status,
         createdAt: row.created_at,
-        assignee: row.developer_id ? { id: row.developer_id, name: row.assignee_name } : null,
+        assignee: row.user_id ? userRef(row.user_id, people.get(row.user_id)) : null,
       })),
       permissions: {
         isMember: Boolean(membership),
@@ -142,7 +140,7 @@ router.post(
         'INSERT INTO projects (title, misc, leader_id, created_by) VALUES (?, ?, ?, ?)',
         [title, misc, req.user.id, req.user.id],
       );
-      await conn.query('INSERT INTO project_member (project_id, developer_id, role) VALUES (?, ?, ?)', [
+      await conn.query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
         result.insertId,
         req.user.id,
         'leader',
@@ -150,7 +148,7 @@ router.post(
       return result.insertId;
     });
     const [created] = await query(`${PROJECT_SUMMARY} WHERE p.id = ?`, [req.user.id, req.user.id, projectId]);
-    res.status(201).json(mapSummary(created));
+    res.status(201).json(mapSummary(created, await getUsers([created.leader_id])));
   }),
 );
 
@@ -169,7 +167,7 @@ router.patch(
     if (Object.keys(patch).length === 0) throw badRequest('NOTHING_TO_UPDATE', '没有可更新的字段');
     await query('UPDATE projects SET ? WHERE id = ?', [patch, project.id]);
     const [updated] = await query(`${PROJECT_SUMMARY} WHERE p.id = ?`, [req.user.id, req.user.id, project.id]);
-    res.json(mapSummary(updated));
+    res.json(mapSummary(updated, await getUsers([updated.leader_id])));
   }),
 );
 
@@ -178,17 +176,17 @@ router.post(
   wrap(async (req, res) => {
     const project = await loadProject(req.params.id);
     requireLeader(project, req.user);
-    const targetId = Number(req.body?.developerId);
-    if (!targetId) throw badRequest('BAD_REQUEST', '缺少 developerId');
+    const targetId = String(req.body?.userId ?? '').trim();
+    if (!targetId) throw badRequest('BAD_REQUEST', '缺少 userId');
     if (targetId === req.user.id) throw badRequest('BAD_REQUEST', '不能转让给自己');
     const target = await loadMembership(project.id, targetId);
-    if (!target) throw notFound('目标开发者不是项目成员');
+    if (!target) throw notFound('目标用户不是项目成员');
     await withTx(async (conn) => {
-      await conn.query("UPDATE project_member SET role = 'participant' WHERE project_id = ? AND developer_id = ?", [
+      await conn.query("UPDATE project_member SET role = 'participant' WHERE project_id = ? AND user_id = ?", [
         project.id,
         req.user.id,
       ]);
-      await conn.query("UPDATE project_member SET role = 'leader' WHERE project_id = ? AND developer_id = ?", [
+      await conn.query("UPDATE project_member SET role = 'leader' WHERE project_id = ? AND user_id = ?", [
         project.id,
         targetId,
       ]);
@@ -204,7 +202,7 @@ router.post(
     const project = await loadProject(req.params.id);
     requireLeader(project, req.user);
     await withTx(async (conn) => {
-      await conn.query('DELETE FROM project_member WHERE project_id = ? AND developer_id = ?', [
+      await conn.query('DELETE FROM project_member WHERE project_id = ? AND user_id = ?', [
         project.id,
         req.user.id,
       ]);
@@ -224,22 +222,22 @@ router.delete(
     }
     const membership = await loadMembership(project.id, req.user.id);
     if (!membership) throw notFound('你不是该项目成员');
-    await query('DELETE FROM project_member WHERE project_id = ? AND developer_id = ?', [project.id, req.user.id]);
+    await query('DELETE FROM project_member WHERE project_id = ? AND user_id = ?', [project.id, req.user.id]);
     await syncAfterRemoval(req.user.id);
     res.json({ ok: true });
   }),
 );
 
 router.delete(
-  '/projects/:id/members/:developerId',
+  '/projects/:id/members/:userId',
   wrap(async (req, res) => {
     const project = await loadProject(req.params.id);
     requireLeader(project, req.user);
-    const targetId = Number(req.params.developerId);
+    const targetId = String(req.params.userId);
     if (targetId === project.leader_id) throw forbidden('CANNOT_FIRE_LEADER', '不能移除 leader');
     const membership = await loadMembership(project.id, targetId);
-    if (!membership) throw notFound('该开发者不是项目成员');
-    await query('DELETE FROM project_member WHERE project_id = ? AND developer_id = ?', [project.id, targetId]);
+    if (!membership) throw notFound('该用户不是项目成员');
+    await query('DELETE FROM project_member WHERE project_id = ? AND user_id = ?', [project.id, targetId]);
     await syncAfterRemoval(targetId);
     res.json({ ok: true });
   }),
