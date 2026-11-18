@@ -1,68 +1,112 @@
 #+title: Developer
 
-Developer —— 一个 sse-market 的 developers 管理平台。
+Developer —— 一个 sse-market 的项目 / 申请 / 需求撮合平台。
 
 * Architecture
 
-|             | developer | participant | leader | project    | demand         |
-|-------------+-----------+-------------+--------+------------+----------------|
-| developer   |           |             |        | apply      |                |
-| participant | is        |             |        | apply/quit | release/accept |
-| leader      | is/accept | fire        |        |            |                |
-| project     |           |             |        |            |                |
-| demand      |           |             |        |            |                |
+|             | user | participant | leader        | project    | demand         |
+|-------------+------+-------------+---------------+------------+----------------|
+| user        |      |             |               | apply      |                |
+| participant | is   |             |               | apply/quit | release/accept |
+| leader      | is   | fire        |               |            |                |
+| project     |      |             |               |            |                |
+| demand      |      |             |               |            |                |
 
-五个表格 developers, projects, proj_member, applies, demands.
+用户不是本平台的实体：唯一的用户表在 UniSSO 里，本地一律只存 =users.id= （也就是
+OAuth 的 =sub= ，36 位字符串）。本库因此只有四张业务表 projects, project_member,
+applies, demands，外加两张辅助表 sessions（登录会话）和 developer_qual_sync
+（回写 UniSSO 开发者资格的待同步队列）。是不是「开发者」同样不是本平台的字段，
+而是 UniSSO =users.is_developer= 的取值。
 #+begin_src dot :file ./static/er-clean.png :exports results
   digraph ER_Clean {
     rankdir=LR;
-    ranksep=2.0;
+    ranksep=1.8;
+    nodesep=0.45;
 
-    node [ shape=Mrecord ];
+    node [ shape=Mrecord, fontname="Noto Sans CJK SC", fontsize=11 ];
     edge [ dir=both ];
 
-    developers
-    [ label="developers |
-     id : [PK]\l
-     name\l" ];
+    users
+    [ label="users（UniSSO，外部） |
+     id : [PK] = OAuth sub\l
+     username\l
+     full_name\l
+     avatar\l
+     email\l
+     is_developer : 是否开发者",
+      style=dashed ];
 
     projects
     [ label="projects |
      id : [PK]\l
      title\l
-     misc\l" ];
+     misc\l
+     leader_id : [FK] users.id\l
+     created_by : [FK] users.id\l
+     created_at / updated_at" ];
 
     project_member
     [ label="project_member |
      id : [PK]\l
-     developer_id : [FK]\l
-     project_id : [FK]\l
-     role : leader / participant" ];
+     project_id : [FK] projects.id\l
+     user_id : [FK] users.id\l
+     role : leader / participant\l
+     created_at\l
+     UNIQUE (project_id, user_id)" ];
 
     applies
     [ label="applies |
      id : [PK]\l
-     developer_id : [FK]\l
-     project_id : [FK]\l
+     project_id : [FK] projects.id\l
+     user_id : [FK] users.id\l
      type : leader / participant\l
-     status : waiting / accepted / rejected" ];
+     status : waiting / accepted / rejected\l
+     note\l
+     resume_url\l
+     source : web / join\l
+     created_at / decided_at\l
+     decided_by : [FK] users.id\l
+     UNIQUE (project_id, user_id, type)" ];
 
     demands
     [ label="demands |
      id : [PK]\l
-     developer_id : [FK]\l
-     project_id : [FK]\l
-     status : waiting / accepted / completed"]
+     project_id : [FK] projects.id\l
+     user_id : [FK] users.id（接单人，可空） \l
+     created_by : [FK] users.id（发布者）\l
+     title\l
+     detail\l
+     status : waiting / accepted / completed\l
+     created_at / accepted_at / completed_at" ];
 
-     developers -> project_member [arrowtail=teetee, arrowhead=crowodot];
-     projects -> project_member [arrowtail=teetee, arrowhead=crowtee];
+    sessions
+    [ label="sessions |
+     id : [PK] CHAR(43)\l
+     user_id : [FK] users.id\l
+     access_token\l
+     access_token_expires_at\l
+     expires_at" ];
 
-     developers -> applies [arrowtail=teetee, arrowhead=crowodot];
-     projects -> applies [arrowtail=teetee, arrowhead=crowodot];
+    developer_qual_sync
+    [ label="developer_qual_sync |
+     id : [PK]\l
+     user_id : [FK] users.id，UNIQUE\l
+     target_value : is_developer 目标值\l
+     status : pending / done / failed\l
+     attempts\l
+     next_attempt_at" ];
 
-     developers -> demands [arrowtail=teetee, arrowhead=crowodot];
-     projects -> demands [arrowtail=teetee, arrowhead=crowodot];
-   }
+    users -> projects [style=dashed, label="leader_id / created_by"];
+    users -> project_member [style=dashed];
+    users -> applies [style=dashed, label="user_id / decided_by"];
+    users -> demands [style=dashed, label="user_id / created_by"];
+    users -> sessions [style=dashed];
+    users -> developer_qual_sync [style=dashed];
+
+    projects -> project_member [arrowtail=teetee, arrowhead=crowtee];
+    projects -> applies [arrowtail=teetee, arrowhead=crowodot];
+    projects -> demands [arrowtail=teetee, arrowhead=crowodot];
+  }
 #+end_src
 
 #+RESULTS:
@@ -82,6 +126,9 @@ Developer —— 一个 sse-market 的 developers 管理平台。
   npm run migrate           # 建表；SEED=1 时顺便造演示数据
   npm start                 # 0.0.0.0:8080
 #+end_src
+
+=migrate= 只建缺失的表，不改已有表结构。从「本地有 developers 表」的旧库升级没有迁移
+脚本（用户实体已搬到 UniSSO），旧库直接丢掉重建即可。
 
 ** 前端
 
@@ -109,6 +156,20 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 =DEV_LOGIN= 会话不查 SSO，直接视为有资格；=GET /api/auth/me= 会带 =developer= 与
 =qualification= （ =ok= / =none= / =unknown= ）供前端判断。
 
+** 用户目录
+
+本平台不存用户资料，列表里的名字、头像、邮箱全部实时从 UniSSO 目录取：
+=POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
+=SSO_CLIENT_SECRET= ）。这个接口只返回全量列表、没有分页与单查，所以缓存放在进程内：
+
+- 惰性：启动时不预取，也没有定时刷新，只有请求真的需要名字时才拉一次；
+- =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内的请求复用同一份数据；
+- 并发请求共享同一次拉取，不会打出一串请求；
+- 拉取失败沿用上一次的结果；从来没有成功过时名字为 =null= ，前端显示「未知用户」，
+  接口带 =directoryStale: true= 提示。业务不因此失败。
+
+=DEV_LOGIN= 打开时目录换成 =server/src/demo-users.js= 里的演示身份，不访问 SSO。
+
 资格写入（Join 方向）：申请通过时写 =is_developer=true= ；被 leader 开除、退出项目或释放项目后，
 若已不属于任何项目则写 =false= 。写入失败不阻塞业务，落在 =developer_qual_sync= 表由后台按
 =QUAL_SYNC_INTERVAL_MS= 重试同一目标值（指数退避，最多 20 次；=400/401/403/404= 视为终态）。
@@ -120,7 +181,7 @@ Developer —— 一个 sse-market 的 developers 管理平台。
 
 ** join 平台接入
 
-join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替 developer
+join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替用户
 提交 participant 申请。该接口不走 UniSSO 会话，用共享密钥 =JOIN_API_KEY= 鉴权：
 
 #+begin_src sh
@@ -137,11 +198,14 @@ join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/ap
 
 也可以把密钥放在 =X-Api-Key= 头里。请求字段：
 
-- =ssoSub= （必填）：developer 的 UniSSO sub，对应 =developers.sso_sub= ；
+- =ssoSub= （必填）：用户在 UniSSO 的 =users.id= （也就是 OAuth sub），本地直接存进
+  =applies.user_id= ；
 - =projectId= （必填）：本平台 =projects.id= ；
 - =resumeUrl= （必填）：http/https 简历地址，审批时由前端直接下载；
-- =note= （可选）：不超过 500 字；
-- =name= / =email= （可选）：仅在新建 developer 时使用，缺省名称为「开发者」。
+- =note= （可选）：不超过 500 字。
+
+姓名、邮箱不在请求里传：它们由目录缓存补全（见上节）。目录里查不到这个 sub 时返回
+=404 USER_NOT_FOUND= ；目录暂时不可用时放行，只按 id 记录申请。
 
 返回：新建申请 =201= ，已存在的等待中申请 =200= 且 =duplicate=true= ，已通过的申请 =200= 且
 =status: accepted= 、 =duplicate=true= ，被拒后重新提交 =200= 且 =reopened=true= ，已是成员 =409= 。
