@@ -1,22 +1,333 @@
-#+title: Developer
+#+title: Developer —— sse-market 项目 / 申请 / 需求撮合平台
 
-Developer —— 一个 sse-market 的项目 / 申请 / 需求撮合平台。
+Developer 是 sse-market 的项目、申请与需求撮合平台：开发者在这里建项目、招成员、发需求，
+别人申请加入项目或承接需求；进入项目的人在 UniSSO 侧获得开发者资格。
 
-* Architecture
+前后端同仓： =server/= 是 Express + MySQL 的 API， =web/= 是 React + Vite 前端。后端在
+=8080= 上同时提供 =/api= 和前端构建产物，因此只需要一个进程。
 
-|             | user | participant | leader        | project    | demand         |
-|-------------+------+-------------+---------------+------------+----------------|
-| user        |      |             |               | apply      |                |
-| participant | is   |             |               | apply/quit | release/accept |
-| leader      | is   | fire        |               |            |                |
-| project     |      |             |               |            |                |
-| demand      |      |             |               |            |                |
+硬约束：用户不是本平台的实体。唯一的用户表在 UniSSO 里，本地一律只存 =users.id=
+（也就是 OAuth 的 =sub= ，36 位字符串）。本库因此只有四张业务表 projects、project_member、
+applies、demands，外加三张辅助表：sessions（登录会话）、user_profile（展示资料缓存，见
+「用户目录」）、developer_qual_sync（回写 UniSSO 开发者资格的待同步队列）。是不是「开发者」
+同样不是本平台的字段，而是 UniSSO =users.is_developer= 的取值。
 
-用户不是本平台的实体：唯一的用户表在 UniSSO 里，本地一律只存 =users.id= （也就是
-OAuth 的 =sub= ，36 位字符串）。本库因此只有四张业务表 projects, project_member,
-applies, demands，外加两张辅助表 sessions（登录会话）和 developer_qual_sync
-（回写 UniSSO 开发者资格的待同步队列）。是不是「开发者」同样不是本平台的字段，
-而是 UniSSO =users.is_developer= 的取值。
+* 一、入口
+
+所有页面除 =/login= 外都要求登录，业务页面还要求开发者资格（服务端拦截，前端显示认证引导页）。
+
+| 页面       | 路由            | 说明                                                                    |
+|------------+-----------------+-------------------------------------------------------------------------|
+| 概览       | =/=             | 用户 / 项目 / 待审申请 / 待接需求四个计数，最近项目、待我处理、需求风向 |
+| 登录       | =/login=        | UniSSO 授权登录；=DEV_LOGIN= 开启时列出演示身份                         |
+| 项目列表   | =/projects=     | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页    |
+| 项目详情   | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、转让、释放、移除成员                 |
+| 开发者列表 | =/users=        | 目录搜索（姓名 / 用户名），附参与项目数与 leader 次数                   |
+| 开发者详情 | =/users/:id=    | 资料、参与项目、申请记录、承接需求                                      |
+| 需求       | =/demands=      | 按状态（待接单 / 进行中 / 已完成）与标题筛选；接单、标记完成            |
+| 我的       | =/me=           | 待我审批、我发出的申请、我参与的项目                                    |
+
+* 二、身份与资格
+
+** UniSSO 授权登录
+
+=auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE）。配置 =SSO_CLIENT_ID= /
+=SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
+
+1. =GET /api/auth/login= 生成一次性 =state= 与 PKCE verifier / challenge，302 到 =authorize= ；
+2. 回调 =GET /api/auth/callback= 用 =code_verifier= 换 token，按 =sub= 建本地会话；
+3. 会话落在 MySQL 的 =sessions= 表（会话 id 为 43 字符），签发 HMAC 签名 Cookie
+   （=SESSION_SECRET= ，有效期 =SESSION_DAYS= ，默认 30 天），access token 随会话保存，
+   用于后续校验开发者资格。
+
+未配置 SSO 时若把 =DEV_LOGIN= 设为 =1= ， =/login= 页面会列出演示开发者供点击登录，便于本地联调。
+
+** 开发者资格门禁
+
+登录后平台用会话保存的 access token 调 =/api/oauth/userinfo= ，只有 =developer= 字段严格为 =true=
+才放行项目、申请、需求等业务接口；不带该字段、为 false 或类型不对一律拒绝。结果按
+=SSO_DEVELOPER_TTL_SECONDS= （默认 60 秒）缓存，可按需调低或设为 0 关闭缓存。
+
+- 未获资格：业务接口返回 =403 NOT_DEVELOPER= ，前端展示认证引导页；
+- 身份服务不可用：返回 =503 SSO_UNAVAILABLE= ，本地会话保留；
+- access token 失效：清除会话并返回 =401 SSO_SESSION_EXPIRED= ，需重新登录。
+
+=DEV_LOGIN= 会话不查 SSO，直接视为有资格；=GET /api/auth/me= 会带 =developer= 与
+=qualification= （ =ok= / =none= / =unknown= ）供前端判断。
+
+** 用户目录
+
+名字、头像、邮箱都来自 UniSSO，本平台只有一份展示缓存，不存身份。两个来源：
+
+1. =POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
+   =SSO_CLIENT_SECRET= ）——一次拿全量。它要求应用在 UniSSO 侧是 =kind= 为 =internal= 且启用
+   M2M（或在 =UNISSO_PASSWORD_VERIFY_CLIENTS= 里），否则返回 =403 password_verify_forbidden= 。
+   没有分页也没有单查，所以结果缓存在进程内：惰性拉取（启动不预取、无定时刷新）、
+   =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内复用、并发请求共享同一次拉取。
+2. =user_profile= 表 —— 登录回调拿到 =userinfo= 后抄一份 =name/avatar/email= 落库
+   （=server/src/directory.js= 的 =remember()= ，写失败只记日志不影响登录）。
+
+取名顺序是：目录命中 → =user_profile= 回落 → 都没有就是 =null= ，前端显示「未知用户」，
+接口带 =directoryStale: true= 提示。业务不因此失败。列表 =/api/users= 是「目录 ∪ user_profile」，
+所以只要登录过一次，名字就一定找得到；从没登录过的人要靠目录接口有权限。
+
+只从缓存拿到资料的人 =developer= 返回 =null= （未知），页面显示「资格未知」。
+
+=DEV_LOGIN= 打开时目录换成 =server/src/demo-users.js= 里的演示身份，不访问 SSO。
+
+** 资格回写
+
+资格写入（Join 方向）：申请通过时写 =is_developer= 为 =true= ；被 leader 移除、退出项目或释放项目后，
+若已不属于任何项目则写 =false= 。写入失败不阻塞业务，落在 =developer_qual_sync= 表由后台按
+=QUAL_SYNC_INTERVAL_MS= 重试同一目标值（指数退避，最多 20 次；=400/401/403/404= 视为终态）。
+写入复用 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= ，平台侧需把本应用加入
+=UNISSO_DEVELOPER_WRITE_CLIENTS= 并开启 =m2m_enabled= ；未配置凭证时写入暂停，业务不受影响。
+
+注意：线上 SSO 需部署返回 =developer= 的版本（unisso 提交 =f2d9e9c= 及以后）。旧版本会让真实账号
+全部落在 403，=DEV_LOGIN= 不受影响；升级前创建的会话没有 access token，需要重新登录。
+
+* 三、项目与成员
+
+** 列表与详情
+
+- =GET /api/projects= ：=q= 匹配项目标题，=filter= 取 =all= / =mine-leader= / =mine-member= /
+  =recruiting= （有 waiting 需求的项目），按创建时间倒序，分页返回 =items/total/page/pageSize= ，
+  每行带 =myRole= 与 =myApplyStatus= 。
+- =GET /api/projects/:id= ：成员按 leader 优先、加入时间排序；需求按 waiting → accepted →
+  completed 排序。返回 =permissions= （ =isMember= / =isLeader= / =canApply= / =canManage= ），
+  前端据此决定显示「申请加入」还是「申请成为 Leader」、以及是否显示管理按钮。
+
+** leader 的动作
+
+创建项目 =POST /api/projects= ：=title= 必填且不超过 128 字，=misc= 可选；同一事务里写入
+projects 与一条 =project_member= 记录（=role= 为 =leader= ），创建者即刻成为 leader。
+
+- =PATCH /api/projects/:id= ：只有 leader 可改 =title= / =misc= ；没有可更新字段时 400。
+- =POST /api/projects/:id/transfer= ：把 leader 转给项目内已有成员——原 leader 降为
+  =participant= 、目标升为 =leader= 、=projects.leader_id= 同步更新。
+- =POST /api/projects/:id/release= ：leader 释放项目，删除自己的成员关系并把 =leader_id= 置空；
+  项目留在列表里等新的 leader 型申请。
+- =DELETE /api/projects/:id/members/:userId= ：移除成员，不能移除 leader 本人。
+
+** 成员的退出与被移除
+
+=DELETE /api/projects/:id/members/me= 退出项目。leader 必须先转让或释放，否则 409
+=LEADER_MUST_TRANSFER= 。
+
+以上三种「离开项目」（释放、退出、被移除）之后都会调用 =syncAfterRemoval= ：若该用户已不属于
+任何项目，就排一条 =is_developer= 为 =false= 的资格回写。
+
+** 拒绝的请求
+
+| 状态 | code                   | 触发条件                               |
+|------+------------------------+----------------------------------------|
+|  400 | =BAD_TITLE=            | 标题为空或超过 128 字                  |
+|  400 | =NOTHING_TO_UPDATE=    | PATCH 没有任何可更新字段               |
+|  403 | =NOT_LEADER=           | 非 leader 改项目、转让、释放、移除成员 |
+|  403 | =CANNOT_FIRE_LEADER=   | 移除目标就是 leader                    |
+|  404 | =NOT_FOUND=            | 项目不存在，或目标用户不是项目成员     |
+|  409 | =LEADER_MUST_TRANSFER= | leader 直接退出项目                    |
+
+* 四、申请
+
+** 提交与重复申请
+
+=POST /api/projects/:id/applies= ，=type= 取 =leader= 或 =participant= （默认后者），=note= 可选
+（落库上限 500 字）。同一 =(project_id, user_id, type)= 只有一条记录：
+
+- 已是成员或 leader → 409 =ALREADY_MEMBER= ；
+- 申请 leader 但项目已有 leader → 409 =LEADER_EXISTS= ；
+- 同类型已有 waiting 申请 → 409 =DUPLICATE_APPLY= ；
+- 同类型申请已通过 → 409 =ALREADY_MEMBER= ；
+- 同类型申请被拒过 → 复用该行，重置为 waiting、清空裁决痕迹、刷新时间，返回 201。
+
+** 审批
+
+=GET /api/applies/inbox= 只列 waiting 且「我是该项目 leader」或「项目 leader 缺位且这是 leader
+型申请」的记录；=GET /api/applies/mine= 列自己最近 100 条申请。
+
+=POST /api/applies/:id/accept= 在一个事务里完成：
+
+1. 写入或更新 =project_member= ，角色取申请类型；
+2. =type= 为 leader 时，仅当 =projects.leader_id IS NULL= 才写入，否则整体 409 =LEADER_EXISTS=
+   （防止两人同时被批成 leader）；
+3. 该申请置 =accepted= ，同项目其余 waiting 申请自动置 =rejected= ；
+4. 事务外排一条 =is_developer= 为 =true= 的资格回写，失败只记日志。
+
+=POST /api/applies/:id/reject= 把 waiting 申请置 =rejected= 。审批人只能是项目 leader；
+leader 缺位的项目没有可授权的人，按先到先得，任何登录开发者都能处理 leader 型申请。
+
+** 撤回
+
+=DELETE /api/applies/:id= 只能撤回自己的、且仍在 waiting 的申请。
+
+** 拒绝的请求
+
+| 状态 | code              | 触发条件                              |
+|------+-------------------+---------------------------------------|
+|  400 | =BAD_TYPE=        | =type= 不是 leader / participant      |
+|  403 | =NOT_LEADER=      | 非该项目 leader 审批                  |
+|  403 | =NOT_OWNER=       | 撤回别人的申请                        |
+|  404 | =NOT_FOUND=       | 申请或项目不存在                      |
+|  409 | =ALREADY_MEMBER=  | 已是成员 / 已是 leader / 该申请已通过 |
+|  409 | =LEADER_EXISTS=   | 项目已有 leader 时申请或审批 leader   |
+|  409 | =DUPLICATE_APPLY= | 同类型已有等待中的申请                |
+|  409 | =NOT_PENDING=     | 审批或撤回已经结束的申请              |
+
+* 五、需求
+
+需求是项目成员发布的小任务，任何开发者都能接单；接单即代表你负责推进。
+
+- =GET /api/demands= ：=status= 取 =waiting= / =accepted= / =completed= ，=q= 匹配标题；
+  排序是 waiting → accepted → completed，同状态按发布时间倒序。
+- =POST /api/projects/:id/demands= ：项目成员才能发布，=title= 必填且不超过 200 字，=detail= 可选。
+- =POST /api/demands/:id/accept= ：只能接 waiting 的需求，不能接自己发布的；写入 =user_id= 与
+  =accepted_at= 。更新条件带 =AND status='waiting'= ，并发接单只有一方成功。
+- =POST /api/demands/:id/complete= ：只有 accepted 的需求可标记完成，允许发布者、接单人、
+  项目 leader 操作；写入 =completed_at= 。
+
+| 状态 | code          | 触发条件                                    |
+|------+---------------+---------------------------------------------|
+|  400 | =BAD_TITLE=   | 标题为空或超过 200 字                       |
+|  403 | =NOT_MEMBER=  | 非项目成员发布需求                          |
+|  403 | =SELF_ACCEPT= | 接自己发布的需求                            |
+|  403 | =NOT_ALLOWED= | 非发布者、非接单人、非项目 leader 标记完成  |
+|  404 | =NOT_FOUND=   | 需求不存在                                  |
+|  409 | =NOT_PENDING= | 接已接单 / 已完成的需求，或完成未接单的需求 |
+
+* 六、角色与权限
+
+| 身份             | 如何获得                                                            | 能做什么                                                |
+|------------------+---------------------------------------------------------------------+---------------------------------------------------------|
+| 未登录           | —                                                                   | 只能打开 =/login= 与 =/api/health=                      |
+| 普通统一身份用户 | UniSSO 登录成功                                                     | 已登录但 =developer= 不为严格 =true= 时业务接口一律 403 |
+| 开发者           | UniSSO 的 =users.is_developer= 为 =true= ；申请通过后由资格回写授予 | 项目 / 申请 / 需求全部读写                              |
+| 项目 leader      | 建项目即成为 leader；或经转让、审批 leader 型申请                   | 改项目信息、审批申请、移除成员、转让、释放              |
+| 项目成员         | 申请通过后写入 =project_member=                                     | 发布需求、标记需求完成、自行退出项目                    |
+| 需求接单人       | 接单（写入 =demands.user_id= ）                                     | 标记自己接的需求完成                                    |
+
+服务端的鉴权顺序在 =server/src/index.js= ： =/api/join= 先挂（不走会话，共享密钥），其余 =/api=
+先 =requireUser= 再 =requireDeveloper= ，最后才进 users / projects / applies / demands 四个路由。
+路由内部再用 =server/src/access.js= 的 =requireLeader= / =requireApplyDecider= / =requireMember=
+收紧到项目维度。
+
+* 七、外部接入：join 平台
+
+join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替用户
+提交 participant 申请。该接口不走 UniSSO 会话，用共享密钥 =JOIN_API_KEY= 鉴权：
+
+#+begin_src sh
+  curl -X POST "$PUBLIC_URL/api/join/applies" \
+    -H "Authorization: Bearer $JOIN_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "ssoSub": "<UniSSO sub>",
+      "projectId": 1,
+      "resumeUrl": "https://oss.example.com/resume/xxx.pdf",
+      "note": "可选"
+    }'
+#+end_src
+
+也可以把密钥放在 =X-Api-Key= 头里。请求字段：
+
+- =ssoSub= （必填）：用户在 UniSSO 的 =users.id= （也就是 OAuth sub），本地直接存进
+  =applies.user_id= ；
+- =projectId= （必填）：本平台 =projects.id= ；
+- =resumeUrl= （必填）：http/https 简历地址，审批时由前端直接下载；
+- =note= （可选）：不超过 500 字。
+
+姓名、邮箱不在请求里传：它们由目录缓存补全（见上节）。目录里查不到这个 sub 时返回
+=404 USER_NOT_FOUND= ；目录暂时不可用时放行，只按 id 记录申请。
+
+返回：新建申请 =201= ，已存在的等待中申请 =200= 且 =duplicate= 为 =true= ，已通过的申请 =200= 且
+=status: accepted= 、 =duplicate= 为 =true= ，被拒后重新提交 =200= 且 =reopened= 为 =true= ，已是成员 =409= 。
+申请进入现有的待审列表，leader 在项目页或「我的」页面通过 / 拒绝；通过后写入
+=project_member= ，简历链接会显示在申请箱里。
+
+=JOIN_API_KEY= 留空时该组接口一律返回 =503= 。
+
+* 八、技术栈
+
+- 后端：Node 18+ + Express 4 + MySQL 8（=mysql2=），ESM 原生模块，无构建步骤；
+  会话落 =sessions= 表，Cookie 用 =SESSION_SECRET= 做 HMAC 签名。
+- 前端：React 18 + React Router 6 + Vite 5，样式是手写 CSS（=web/src/styles.css= ），
+  没有 UI 框架。
+- 部署：单进程单端口，前后端同源；=PORT= 默认 8080，对外只需一个端口。
+
+* 九、本地开发
+
+** 后端
+
+#+begin_src sh
+  cd server
+  cp .env.example .env      # 填 MYSQL_* 等
+  npm install
+  npm run migrate           # 建表；SEED=1 时顺便造演示数据
+  npm start                 # 0.0.0.0:8080
+#+end_src
+
+** 前端
+
+#+begin_src sh
+  cd web
+  npm install
+  npm run build             # 产物给后端托管
+  npm run dev               # 或开发模式 5173，/api 代理到 8080
+#+end_src
+
+Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （默认
+=http://127.0.0.1:8080= ）。改后端端口时同时改这个变量。
+
+** 登录与联调
+
+- 没有 SSO 应用时把 =DEV_LOGIN= 设为 =1= ，直接点演示身份登录；演示身份不查 SSO，视为有开发者资格。
+- 用真实身份联调时，回调地址 =SSO_REDIRECT_URI= 必须与 UniSSO 应用登记的一致；留空则按请求
+  Host 推导成 =<proto>://<host>/api/auth/callback= 。
+- 目录接口 =users/list= 报 =403 password_verify_forbidden= 时，不是代码问题：本应用需要在
+  UniSSO 侧 =kind= 为 =internal= 且 =m2m_enabled= 为 =true= 。此时名字退化成 =user_profile= 缓存，
+  只对登录过的人有效。
+- =GET /api/health= 会返回 =db= 与 =sso/devLogin= 状态，联调先看它。
+
+* 十、构建与部署
+
+#+begin_src sh
+  cd web && npm install && npm run build     # 产物在 web/dist
+  cd ../server && npm install && npm start    # 0.0.0.0:8080
+#+end_src
+
+- 后端不需要构建，直接跑源码；只有前端要 =vite build= 。
+- 静态托管在 =server/src/index.js= ：=express.static("../../web/dist")= 带 1 小时缓存，
+  非 =/api/= 的 GET 回落到 =index.html= ；每次请求才判断 =index.html= 是否存在，所以进程先起、
+  再构建前端也能直接生效，不必重启。
+- =dist= 不存在时非 API 请求返回纯文本「前端尚未构建，请先在 web/ 目录运行 npm run build。」。
+- 容器内可用 =server/run-dev.sh= ：先杀掉占用 8080 的旧进程，再 =setsid node src/index.js=
+  后台启动，日志写到 =/tmp/api.log= ，最后 =curl /api/health= 自检。
+- 进程内还有两处兜底：=unhandledRejection= / =uncaughtException= 只记日志不让进程退出；
+  Express 4 的 async 处理器统一用 =wrap()= 包住，否则 rejection 会直接掀掉进程。
+
+* 十一、环境变量
+
+完整占位见 =server/.env.example= 。
+
+| 变量                                                                       | 必填     | 默认 / 说明                                                              |
+|----------------------------------------------------------------------------+----------+--------------------------------------------------------------------------|
+| =PORT=                                                                     | 否       | =8080= ，监听 =0.0.0.0=                                                  |
+| =MYSQL_HOST= / =MYSQL_PORT= / =MYSQL_USER= / =MYSQL_PASSWORD= / =MYSQL_DB= | 是       | 库连接信息                                                               |
+| =SSO_ISSUER=                                                               | 否       | =https://sso.ssemarket.cn=                                               |
+| =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET=                                      | 是       | UniSSO 应用凭证，授权与 M2M 共用                                         |
+| =SSO_REDIRECT_URI=                                                         | 否       | 留空按请求 Host 推导为 =<proto>://<host>/api/auth/callback=              |
+| =SSO_SCOPE=                                                                | 否       | =openid profile:username profile:name profile:avatar email sse_identity= |
+| =SSO_DEVELOPER_TTL_SECONDS=                                                | 否       | =60= ；0 表示每次请求都查 userinfo                                       |
+| =SSO_DIRECTORY_TTL_SECONDS=                                                | 否       | =60= ；0 表示不缓存，每次拉全量目录                                      |
+| =SSO_WRITE_TIMEOUT_MS=                                                     | 否       | =5000= ，资格写入超时                                                    |
+| =QUAL_SYNC_INTERVAL_MS=                                                    | 否       | =15000= ；小于等于 0 时关闭后台任务                                      |
+| =DEV_LOGIN=                                                                | 否       | =1= 强制开启演示登录，=0= 强制关闭，留空则仅在未配置 SSO 时开启          |
+| =SESSION_SECRET=                                                           | 生产必填 | 会话 Cookie 签名密钥，换掉即全体掉线，重启不变则会话不丢                 |
+| =SESSION_DAYS=                                                             | 否       | =30=                                                                     |
+| =JOIN_API_KEY=                                                             | 接入时   | 共享密钥；留空时 =/api/join/*= 一律 503                                  |
+
+* 十二、数据模型
+
 #+begin_src dot :file ./static/er-clean.png :exports results
   digraph ER_Clean {
     rankdir=LR;
@@ -112,110 +423,109 @@ applies, demands，外加两张辅助表 sessions（登录会话）和 developer
 #+RESULTS:
 [[file:./static/er-clean.png]]
 
-* 运行
+=user_profile= 不在图里，字段只有 =user_id= / =name= / =avatar= / =email= / =updated_at= ，
+纯粹是展示缓存。
 
-前后端同仓： =server/= 是 Express + MySQL 的 API， =web/= 是 React + Vite 前端。
-后端在 8080 上同时提供 =/api= 和前端构建产物，因此只需要一个进程。
+建表脚本是 =server/src/schema.sql= ，由 =npm run migrate= 执行：只建缺失的表，不改已有表结构。
+从「本地有 developers 表」的旧库升级没有迁移脚本（用户实体已搬到 UniSSO），旧库直接丢掉重建即可。
 
-** 后端
+* 十三、API 清单
 
-#+begin_src sh
-  cd server
-  cp .env.example .env      # 填 MYSQL_* 等
-  npm install
-  npm run migrate           # 建表；SEED=1 时顺便造演示数据
-  npm start                 # 0.0.0.0:8080
+=page= （默认 1）与 =pageSize= （默认 20，上限 100）用于分页；错误统一是
+={"error":{"code":"...","message":"..."}}= ，5xx 不回传内部信息。
+
+** 认证与健康检查
+
+| 方法 | 路径                       | 鉴权 | 说明                                          |
+|------+----------------------------+------+-----------------------------------------------|
+| GET  | =/api/health=              | 无   | DB 与 SSO / DEV_LOGIN 状态                    |
+| GET  | =/api/auth/login=          | 无   | 生成 state + PKCE，302 到 UniSSO authorize    |
+| GET  | =/api/auth/callback=       | 无   | 授权码回调，换 token 并按 sub 建会话          |
+| GET  | =/api/auth/me=             | 会话 | 当前用户、=developer=、=qualification=        |
+| POST | =/api/auth/logout=         | 会话 | 清会话                                        |
+| GET  | =/api/auth/dev/identities= | 无   | =DEV_LOGIN= 演示身份列表                      |
+| POST | =/api/auth/dev-login=      | 无   | 以演示身份建会话，仅在 =DEV_LOGIN= 开启时可用 |
+
+** 业务接口
+
+以下都要求会话 + 开发者资格（=requireUser= 然后 =requireDeveloper= ）。
+
+| 方法   | 路径                                | 鉴权   | 说明                                   |
+|--------+-------------------------------------+--------+----------------------------------------|
+| GET    | =/api/users=                        | 开发者 | 目录 ∪ user_profile 搜索，附项目参与度 |
+| GET    | =/api/users/:id=                    | 开发者 | 资料 + 参与项目 / 申请 / 需求          |
+| GET    | =/api/projects=                     | 开发者 | 列表，=q= / =filter= / 分页            |
+| POST   | =/api/projects=                     | 开发者 | 建项目，创建者成为 leader              |
+| GET    | =/api/projects/:id=                 | 开发者 | 详情 + 成员 + 需求 + permissions       |
+| PATCH  | =/api/projects/:id=                 | leader | 改 title / misc                        |
+| POST   | =/api/projects/:id/transfer=        | leader | 转让给项目内成员                       |
+| POST   | =/api/projects/:id/release=         | leader | 释放项目，leader_id 置空               |
+| DELETE | =/api/projects/:id/members/me=      | 成员   | 退出项目（leader 需先转让或释放）      |
+| DELETE | =/api/projects/:id/members/:userId= | leader | 移除成员，不能移除 leader              |
+| POST   | =/api/projects/:id/applies=         | 开发者 | 提交 leader / participant 申请         |
+| GET    | =/api/applies/mine=                 | 开发者 | 自己的申请（最近 100 条）              |
+| GET    | =/api/applies/inbox=                | 开发者 | 等我审批的 waiting 申请                |
+| POST   | =/api/applies/:id/accept=           | leader | 通过申请，其余 waiting 自动拒绝        |
+| POST   | =/api/applies/:id/reject=           | leader | 拒绝申请                               |
+| DELETE | =/api/applies/:id=                  | 本人   | 撤回 waiting 申请                      |
+| GET    | =/api/demands=                      | 开发者 | 需求列表，=status= / =q= / 分页        |
+| POST   | =/api/projects/:id/demands=         | 成员   | 发布需求                               |
+| POST   | =/api/demands/:id/accept=           | 开发者 | 接单，不能接自己发的                   |
+| POST   | =/api/demands/:id/complete=         | 相关人 | 发布者 / 接单人 / 项目 leader 标记完成 |
+
+** 外部接入
+
+| 方法 | 路径                | 鉴权           | 说明                                 |
+|------+---------------------+----------------+--------------------------------------|
+| POST | =/api/join/applies= | =JOIN_API_KEY= | join 平台代用户提交 participant 申请 |
+
+* 十四、FAQ
+
+- 本地没有 SSO 应用怎么登录？把 =DEV_LOGIN= 设为 =1= ， =/login= 会列出 =demo-users.js= 里的演示身份。
+- 登录成功但提示没有资格？业务接口只认 =userinfo= 里严格为 =true= 的 =developer= ；去集市完成
+  开发者认证，或申请加入一个项目，通过后由资格回写授予。
+- join 平台调用为什么 503？ =JOIN_API_KEY= 没配，或与 join 侧不一致。
+- 为什么名字显示「未知用户」？目录接口不可用（本应用没有 M2M 权限）且该用户从未登录过，
+  =user_profile= 里也没有记录；接口的 =directoryStale: true= 表示目录是降级状态。
+- 资格回写失败要不要人工补？不用，落在 =developer_qual_sync= 按 =QUAL_SYNC_INTERVAL_MS=
+  重试，最多 20 次；=400/401/403/404= 视为终态，需要先修 UniSSO 侧配置。
+- 审批通过之后我还不是开发者？回写是异步的，且 =userinfo= 结果有
+  =SSO_DEVELOPER_TTL_SECONDS= 缓存；等缓存过期并重新请求即可。
+
+* 十五、目录结构
+
+#+begin_src text
+  server/
+    src/
+      index.js        # 组装 Express、路由挂载、静态托管、错误处理
+      auth.js         # UniSSO 授权 / 回调 / 会话 / 资格门禁
+      unisso.js       # SSO 端点封装
+      sso-config.js   # 从环境变量读 SSO 配置
+      directory.js    # 用户目录缓存 + user_profile 兜底
+      qual-sync.js    # 资格回写队列与重试
+      access.js       # 项目 / 成员 / leader 鉴权
+      http.js         # 错误类型、分页、wrap
+      db.js           # 连接池与事务辅助
+      migrate.js      # 执行 schema.sql（SEED=1 时造演示数据）
+      schema.sql      # 建表脚本
+      demo-users.js   # DEV_LOGIN 演示身份
+      routes/
+        users.js      # 目录搜索 / 用户详情
+        projects.js   # 项目 CRUD、转让、释放、成员移除
+        applies.js    # 申请、审批、撤回
+        demands.js    # 需求发布、接单、完成
+        join.js       # join 平台接入（共享密钥）
+    run-dev.sh        # 本地/容器内重启后端并自检
+  web/
+    src/
+      App.jsx         # 路由表与 Layout、RequireAuth
+      api.js          # fetch 封装与错误码文案
+      auth.jsx        # 登录态
+      hooks.js        # 数据请求 hook
+      ui.jsx          # 表格 / 徽章 / 空态等基础组件
+      styles.css      # 全部样式
+      pages/          # Home / Login / Projects / ProjectDetail / Users /
+                      # UserDetail / Demands / Profile / NoQualification
+    vite.config.js    # 5173 端口与 /api 代理
+  static/er-clean.png # ER 图导出
 #+end_src
-
-=migrate= 只建缺失的表，不改已有表结构。从「本地有 developers 表」的旧库升级没有迁移
-脚本（用户实体已搬到 UniSSO），旧库直接丢掉重建即可。
-
-** 前端
-
-#+begin_src sh
-  cd web
-  npm install
-  npm run build             # 产物给后端托管
-  npm run dev               # 或开发模式 5173，/api 代理到 8080
-#+end_src
-
-** 登录
-
-=auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE）。配置 =SSO_CLIENT_ID= /
-=SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
-未配置时若 =DEV_LOGIN=1= ， =/login= 页面会列出演示开发者供点击登录，便于本地联调。
-
-登录后平台用会话保存的 access token 调 =/api/oauth/userinfo= ，只有 =developer === true=
-才放行项目、申请、需求等业务接口；不带该字段、为 false 或类型不对一律拒绝。结果按
-=SSO_DEVELOPER_TTL_SECONDS= （默认 60 秒）缓存，可按需调低或设为 0 关闭缓存。
-
-- 未获资格：业务接口返回 =403 NOT_DEVELOPER= ，前端展示认证引导页；
-- 身份服务不可用：返回 =503 SSO_UNAVAILABLE= ，本地会话保留；
-- access token 失效：清除会话并返回 =401 SSO_SESSION_EXPIRED= ，需重新登录。
-
-=DEV_LOGIN= 会话不查 SSO，直接视为有资格；=GET /api/auth/me= 会带 =developer= 与
-=qualification= （ =ok= / =none= / =unknown= ）供前端判断。
-
-** 用户目录
-
-名字、头像、邮箱都来自 UniSSO，本平台只有一份展示缓存，不存身份。两个来源：
-
-1. =POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
-   =SSO_CLIENT_SECRET= ）——一次拿全量。它要求应用在 UniSSO 侧是 =kind=internal= 且启用
-   M2M（或在 =UNISSO_PASSWORD_VERIFY_CLIENTS= 里），否则返回 =403 password_verify_forbidden= 。
-   没有分页也没有单查，所以结果缓存在进程内：惰性拉取（启动不预取、无定时刷新）、
-   =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内复用、并发请求共享同一次拉取。
-2. =user_profile= 表 —— 登录回调拿到 =userinfo= 后抄一份 =name/avatar/email= 落库
-   （=server/src/directory.js= 的 =remember()= ，写失败只记日志不影响登录）。
-
-取名顺序是：目录命中 → =user_profile= 回落 → 都没有就是 =null= ，前端显示「未知用户」，
-接口带 =directoryStale: true= 提示。业务不因此失败。列表 =/api/users= 是「目录 ∪ user_profile」，
-所以只要登录过一次，名字就一定找得到；从没登录过的人要靠目录接口有权限。
-
-只从缓存拿到资料的人 =developer= 返回 =null= （未知），页面显示「资格未知」。
-
-=DEV_LOGIN= 打开时目录换成 =server/src/demo-users.js= 里的演示身份，不访问 SSO。
-
-资格写入（Join 方向）：申请通过时写 =is_developer=true= ；被 leader 开除、退出项目或释放项目后，
-若已不属于任何项目则写 =false= 。写入失败不阻塞业务，落在 =developer_qual_sync= 表由后台按
-=QUAL_SYNC_INTERVAL_MS= 重试同一目标值（指数退避，最多 20 次；=400/401/403/404= 视为终态）。
-写入复用 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= ，平台侧需把本应用加入
-=UNISSO_DEVELOPER_WRITE_CLIENTS= 并开启 =m2m_enabled= ；未配置凭证时写入暂停，业务不受影响。
-
-注意：线上 SSO 需部署返回 =developer= 的版本（unisso 提交 =f2d9e9c= 及以后）。旧版本会让真实账号
-全部落在 403，=DEV_LOGIN= 不受影响；升级前创建的会话没有 access token，需要重新登录。
-
-** join 平台接入
-
-join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替用户
-提交 participant 申请。该接口不走 UniSSO 会话，用共享密钥 =JOIN_API_KEY= 鉴权：
-
-#+begin_src sh
-  curl -X POST "$PUBLIC_URL/api/join/applies" \
-    -H "Authorization: Bearer $JOIN_API_KEY" \
-    -H 'Content-Type: application/json' \
-    -d '{
-      "ssoSub": "<UniSSO sub>",
-      "projectId": 1,
-      "resumeUrl": "https://oss.example.com/resume/xxx.pdf",
-      "note": "可选"
-    }'
-#+end_src
-
-也可以把密钥放在 =X-Api-Key= 头里。请求字段：
-
-- =ssoSub= （必填）：用户在 UniSSO 的 =users.id= （也就是 OAuth sub），本地直接存进
-  =applies.user_id= ；
-- =projectId= （必填）：本平台 =projects.id= ；
-- =resumeUrl= （必填）：http/https 简历地址，审批时由前端直接下载；
-- =note= （可选）：不超过 500 字。
-
-姓名、邮箱不在请求里传：它们由目录缓存补全（见上节）。目录里查不到这个 sub 时返回
-=404 USER_NOT_FOUND= ；目录暂时不可用时放行，只按 id 记录申请。
-
-返回：新建申请 =201= ，已存在的等待中申请 =200= 且 =duplicate=true= ，已通过的申请 =200= 且
-=status: accepted= 、 =duplicate=true= ，被拒后重新提交 =200= 且 =reopened=true= ，已是成员 =409= 。
-申请进入现有的待审列表，leader 在项目页或「我的」页面通过 / 拒绝；通过后写入
-=project_member= ，简历链接会显示在申请箱里。
-
-=JOIN_API_KEY= 留空时该组接口一律返回 =503= 。
