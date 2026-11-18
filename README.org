@@ -19,7 +19,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 | 页面       | 路由            | 说明                                                                    |
 |------------+-----------------+-------------------------------------------------------------------------|
 | 概览       | =/=             | 用户 / 项目 / 待审申请 / 待接需求四个计数，最近项目、待我处理、需求风向 |
-| 登录       | =/login=        | 邮箱密码或 UniSSO 授权登录； =DEV_LOGIN= 开启时另列演示身份              |
+| 登录       | =/login=        | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                     |
 | 项目列表   | =/projects=     | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页    |
 | 项目详情   | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、转让、释放、移除成员                 |
 | 开发者列表 | =/users=        | 目录搜索（姓名 / 用户名），附参与项目数与 leader 次数                   |
@@ -29,28 +29,22 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 
 * 二、身份与资格
 
-** 邮箱密码登录
+** 登录方式：跳转授权
 
-登录页默认用 UniSSO 的邮箱和密码直接登录，不需要跳转授权页。 =POST /api/auth/login=
-接收 ={"email":"...","password":"..."}= ，服务端把邮箱、密码和 =SSO_CLIENT_ID= /
-=SSO_CLIENT_SECRET= 发给 UniSSO 的 =/api/oauth/password/verify= 。成功响应里的 =user.sub=
-就是本地会话的 =user_id= ， =name/email/picture/developer= 同时写入 =user_profile= 与会话快照。
+本应用在 UniSSO 侧登记为对外（ =kind= 为 =external= ）应用，只能走标准授权码流程：
+=GET /api/auth/login= → =/authorize= → 同意页 → 回调带 =code= → 后端换 token → 取 =userinfo= 。
+external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden= ，
+所以登录页没有邮箱密码表单，只有「使用 SSE 统一身份授权登录」一个入口。
 
-- =401= → 邮箱或密码错误；
-- =403= → 应用未开通密码校验（ =password_verify_forbidden= ）；
-- =429= → 尝试过于频繁；
-- =502= → 统一身份不可用。
-
-密码会话没有 OAuth access token，因此资格不查 =userinfo= ：登录时把 =developer= 存进
-=sessions.developer= ，之后按 =SSO_DEVELOPER_TTL_SECONDS= 用 =users/list= 的 M2M 目录刷新；
-目录不可用时沿用上一次的值。会话来源记在 =sessions.auth_method= （ =password= / =sso= / =dev= ），
-=DEV_LOGIN= 的放行逻辑只对没有 access token 的旧会话和 =dev= 会话生效，不会把密码会话误判为开发者。
-
-密码登录不下发 =ssemarket.cn= 父域 Cookie，退出只清本地 =sid= 。
+- 每次授权都展示同意页（ =auto_approved= 恒为 false），做不到静默重登；
+- =code= 一次性，过期或重复使用返回 =invalid_grant= ；
+- 没有 RP-initiated logout，也没有令牌吊销端点，退出只清本地会话；
+- access token 有效期 1 小时，过期前用会话里保存的 =refresh_token= 续期，
+  续期失败的会话才要求重新授权。
 
 ** UniSSO 授权登录
 
-=auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE），作为邮箱密码之外的备用入口。
+=auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE S256），这是唯一登录方式。
 配置 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
 
 1. =GET /api/auth/login= 生成一次性 =state= 与 PKCE verifier / challenge，302 到 =authorize= ；
@@ -65,8 +59,8 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 
 授权登录的会话用保存的 access token 调 =/api/oauth/userinfo= ，只有 =developer= 字段严格为 =true=
 才放行项目、申请、需求等业务接口；不带该字段、为 false 或类型不对一律拒绝。结果按
-=SSO_DEVELOPER_TTL_SECONDS= （默认 60 秒）缓存，可按需调低或设为 0 关闭缓存。密码登录的会话
-没有 access token，按上一节的方式用 =sessions.developer= 与目录刷新判断，不调 =userinfo= 。
+=SSO_DEVELOPER_TTL_SECONDS= （默认 60 秒）缓存，可按需调低或设为 0 关闭缓存。
+=DEV_LOGIN= 造的会话没有 SSO token，只在 =DEV_LOGIN= 开启时放行。
 
 - 未获资格：业务接口返回 =403 NOT_DEVELOPER= ，前端展示认证引导页；
 - 身份服务不可用：返回 =503 SSO_UNAVAILABLE= ，本地会话保留；
@@ -80,8 +74,8 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 名字、头像、邮箱都来自 UniSSO，本平台只有一份展示缓存，不存身份。两个来源：
 
 1. =POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
-   =SSO_CLIENT_SECRET= ）——一次拿全量。它要求应用在 UniSSO 侧是 =kind= 为 =internal= 且启用
-   M2M（或在 =UNISSO_PASSWORD_VERIFY_CLIENTS= 里），否则返回 =403 password_verify_forbidden= 。
+   =SSO_CLIENT_SECRET= ）——一次拿全量。它是 M2M 接口，只对内接应用开放；本应用是
+   =kind= 为 =external= ，调用会得到 =403 password_verify_forbidden= ，属于预期行为。
    没有分页也没有单查，所以结果缓存在进程内：惰性拉取（启动不预取、无定时刷新）、
    =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内复用、并发请求共享同一次拉取。
 2. =user_profile= 表 —— 登录回调拿到 =userinfo= 后抄一份 =name/avatar/email= 落库
@@ -304,9 +298,10 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 
 ** 登录与联调
 
-- 邮箱密码登录调 UniSSO 的 =password/verify= ，同样要求应用在 UniSSO 侧 =kind= 为 =internal=
-  且 =m2m_enabled= 为 =true= （或加入 =UNISSO_PASSWORD_VERIFY_CLIENTS= ）；返回
-  =403 PASSWORD_LOGIN_FORBIDDEN= 是应用权限问题，不是密码错误。
+- 本应用是对外应用，走 =/authorize= 跳转授权； =password/verify= 与 =users/list= 这类 M2M
+  接口对 external 应用一律 =403 password_verify_forbidden= ，不要再据此判断密码对错。
+- 部署或重启后先跑 =npm run check:sso= ：用本应用凭证调 =/api/oauth/introspect= （token 留空），
+  期望 =200 {"active":false}= ；返回 =401 invalid_client= 说明 secret 不对或已被重置。
 - 没有 SSO 应用时把 =DEV_LOGIN= 设为 =1= ，直接点演示身份登录；演示身份不查 SSO，视为有开发者资格。
   有 SSO 应用时若仍设 =1= ，演示身份会出现在登录页并可直接获得资格，生产环境应设 =0= 。
 - 用真实身份联调时，回调地址 =SSO_REDIRECT_URI= 必须与 UniSSO 应用登记的一致；留空则按请求
@@ -345,7 +340,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | =PORT=                                                                     | 否       | =8080= ，监听 =0.0.0.0=                                                  |
 | =MYSQL_HOST= / =MYSQL_PORT= / =MYSQL_USER= / =MYSQL_PASSWORD= / =MYSQL_DB= | 是       | 库连接信息                                                               |
 | =SSO_ISSUER=                                                               | 否       | =https://sso.ssemarket.cn=                                               |
-| =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET=                                      | 是       | UniSSO 应用凭证，授权、密码校验与 M2M 共用                               |
+| =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET=                                      | 是       | UniSSO 应用凭证，只留在后端；secret 只在生成时显示一次                   |
 | =SSO_REDIRECT_URI=                                                         | 否       | 留空按请求 Host 推导为 =<proto>://<host>/api/auth/callback=              |
 | =SSO_SCOPE=                                                                | 否       | =openid profile:username profile:name profile:avatar email sse_identity= |
 | =SSO_DEVELOPER_TTL_SECONDS=                                                | 否       | =60= ；0 表示每次请求都查 userinfo                                       |
@@ -425,9 +420,10 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
     [ label="sessions |
      id : [PK] CHAR(43)\l
      user_id : [FK] users.id\l
-     auth_method : sso / password / dev\l
+     auth_method : sso / dev\l
      developer : 最近一次资格\l
      access_token\l
+     refresh_token\l
      access_token_expires_at\l
      expires_at" ];
 
@@ -474,7 +470,6 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 |------+----------------------------+------+-----------------------------------------------|
 | GET  | =/api/health=              | 无   | DB 与 SSO / DEV_LOGIN 状态                    |
 | GET  | =/api/auth/login=          | 无   | 生成 state + PKCE，302 到 UniSSO authorize    |
-| POST | =/api/auth/login=          | 无   | 邮箱密码登录，调 UniSSO password/verify       |
 | GET  | =/api/auth/callback=       | 无   | 授权码回调，换 token 并按 sub 建会话          |
 | GET  | =/api/auth/me=             | 会话 | 当前用户、 =developer= 、 =qualification=        |
 | POST | =/api/auth/logout=         | 会话 | 清会话                                        |
