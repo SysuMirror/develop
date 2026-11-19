@@ -228,8 +228,24 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 
 * 七、外部接入：join 平台
 
-join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/applies= ，替用户
-提交 participant 申请。该接口不走 UniSSO 会话，用共享密钥 =JOIN_API_KEY= 鉴权：
+join 平台（ =https://join.ssemarket.cn= ）的后端替用户选项目、提交 participant 申请。下面两个
+接口都不走 UniSSO 会话，用共享密钥 =JOIN_API_KEY= 鉴权： =Authorization: Bearer <key>= ，
+也可以放进 =X-Api-Key= 头；密钥留空时整组接口一律返回 =503= 。
+
+** 项目发现
+
+用户先选项目才有 =projectId= ，所以 join 侧先拉列表。它只回 =id= 与 =title= ，不含成员、
+leader 与申请数：
+
+#+begin_src sh
+  curl -sS "$PUBLIC_URL/api/join/projects?q=&page=1&pageSize=20" \
+    -H "Authorization: Bearer $JOIN_API_KEY"
+#+end_src
+
+返回 ={"items":[{"id":3,"title":"..."}],"total":1,"page":1,"pageSize":20}= ； =q= 按标题模糊匹配，
+=page= 从 1 起、 =pageSize= 默认 20 上限 100 ，没有匹配时 =items= 是空数组而不是 =404= 。
+
+** 提交申请
 
 #+begin_src sh
   curl -X POST "$PUBLIC_URL/api/join/applies" \
@@ -243,11 +259,11 @@ join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/ap
     }'
 #+end_src
 
-也可以把密钥放在 =X-Api-Key= 头里。请求字段：
+请求字段：
 
 - =ssoSub= （必填）：用户在 UniSSO 的 =users.id= （也就是 OAuth sub），本地直接存进
   =applies.user_id= ；
-- =projectId= （必填）：本平台 =projects.id= ；
+- =projectId= （必填）：本平台 =projects.id= ，由上面的项目发现接口给出；
 - =resumeUrl= （必填）：http/https 简历地址，审批时由前端直接下载；
 - =note= （可选）：不超过 500 字。
 
@@ -258,8 +274,6 @@ join 平台（ =https://join.ssemarket.cn= ）的后端调用 =POST /api/join/ap
 =status: accepted= 、 =duplicate= 为 =true= ，被拒后重新提交 =200= 且 =reopened= 为 =true= ，已是成员 =409= 。
 申请进入现有的待审列表，leader 在项目页或「我的」页面通过 / 拒绝；通过后写入
 =project_member= ，简历链接会显示在申请箱里。
-
-=JOIN_API_KEY= 留空时该组接口一律返回 =503= 。
 
 * 八、技术栈
 
