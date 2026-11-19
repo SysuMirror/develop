@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import type { Request } from 'express';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { one, withTx } from '../db.ts';
+import { one, query, withTx } from '../db.ts';
 import { lookup } from '../directory.ts';
-import { ApiError, badRequest, conflict, wrap } from '../http.ts';
+import { ApiError, badRequest, conflict, likeTerm, parsePaging, wrap } from '../http.ts';
 
 const router = Router();
 
@@ -161,6 +161,32 @@ function submitApply(
     return { id: existing.id, status: 'waiting', duplicate: false, created: false, reopened: true };
   });
 }
+
+interface ProjectTitleRow extends RowDataPacket {
+  id: number;
+  title: string;
+}
+
+// join 侧要先让用户选项目才拿得到 projectId，所以给一个只读的最小列表：
+// 只回 id 与 title，成员、leader、申请数都不暴露。
+router.get(
+  '/projects',
+  wrap(async (req, res) => {
+    const { page, pageSize, offset } = parsePaging(req);
+    const term = likeTerm(req.query.q);
+    const where = term ? 'WHERE title LIKE ?' : '';
+    const filter: unknown[] = term ? [term] : [];
+    const rows = await query<ProjectTitleRow>(
+      `SELECT id, title FROM projects ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      [...filter, pageSize, offset],
+    );
+    const [counted] = await query<{ total: number | string }>(
+      `SELECT COUNT(*) AS total FROM projects ${where}`,
+      filter,
+    );
+    res.json({ items: rows.map((row) => ({ id: row.id, title: row.title })), total: Number(counted?.total ?? 0), page, pageSize });
+  }),
+);
 
 router.post(
   '/applies',
