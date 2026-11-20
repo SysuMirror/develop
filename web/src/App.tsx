@@ -4,7 +4,10 @@ import { useAuth } from './auth';
 import { Avatar, Skeleton, displayName } from './ui';
 import HomePage from './pages/HomePage';
 import ProjectsPage from './pages/ProjectsPage';
+import ProjectFormPage from './pages/ProjectFormPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
+import DemandNewPage from './pages/DemandNewPage';
+import ApplyPage from './pages/ApplyPage';
 import DemandsPage from './pages/DemandsPage';
 import DemandDetailPage from './pages/DemandDetailPage';
 import DemandEditPage from './pages/DemandEditPage';
@@ -121,6 +124,38 @@ export default function App() {
           element={
             <RequireAuth>
               <ProjectsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="projects/new"
+          element={
+            <RequireAuth>
+              <ProjectFormPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="projects/:id/edit"
+          element={
+            <RequireAuth>
+              <ProjectFormPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="projects/:id/demands/new"
+          element={
+            <RequireAuth>
+              <DemandNewPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="projects/:id/apply"
+          element={
+            <RequireAuth>
+              <ApplyPage />
             </RequireAuth>
           }
         />

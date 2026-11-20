@@ -21,22 +21,12 @@ import {
 } from '../ui';
 import type { ApplyItem, ProjectDetail } from '../types';
 
-type DialogKind = 'apply' | 'edit' | 'demand' | 'quit' | 'delete' | 'kick';
+type DialogKind = 'quit' | 'delete' | 'kick';
 
 interface DialogState {
   kind: DialogKind;
   userId?: string;
   name?: string;
-}
-
-interface EditForm {
-  title: string;
-  misc: string;
-}
-
-interface DemandForm {
-  title: string;
-  detail: string | null;
 }
 
 export default function ProjectDetailPage() {
@@ -112,18 +102,22 @@ export default function ProjectDetailPage() {
         </div>
         <div className="row">
           {permissions.canApply ? (
-            <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: 'apply' })}>
+            <button type="button" className="btn btn-primary" onClick={() => navigate(`/projects/${id}/apply`)}>
               申请加入
             </button>
           ) : null}
           {isMember ? (
-            <button type="button" className="btn btn-secondary" onClick={() => setDialog({ kind: 'demand' })}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate(`/projects/${id}/demands/new`)}
+            >
               发布需求
             </button>
           ) : null}
           {isLeader ? (
             <>
-              <button type="button" className="btn btn-secondary" onClick={() => setDialog({ kind: 'edit' })}>
+              <button type="button" className="btn btn-secondary" onClick={() => navigate(`/projects/${id}/edit`)}>
                 编辑
               </button>
               <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'delete' })}>
@@ -291,28 +285,6 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      <ApplyDialog
-        open={dialog?.kind === 'apply'}
-        onClose={() => setDialog(null)}
-        busy={busy}
-        onSubmit={(form) => run(() => api.post(`/projects/${id}/applies`, form), '申请已提交')}
-      />
-
-      <EditDialog
-        open={dialog?.kind === 'edit'}
-        onClose={() => setDialog(null)}
-        initial={{ title: data.title, misc: data.misc || '' }}
-        busy={busy}
-        onSubmit={(form) => run(() => api.patch(`/projects/${id}`, form), '已保存')}
-      />
-
-      <DemandDialog
-        open={dialog?.kind === 'demand'}
-        onClose={() => setDialog(null)}
-        busy={busy}
-        onSubmit={(form) => run(() => api.post(`/projects/${id}/demands`, form), '需求已发布')}
-      />
-
       <Modal
         open={dialog?.kind === 'quit'}
         title="退出项目"
@@ -354,44 +326,6 @@ export default function ProjectDetailPage() {
         onConfirm={() => run(() => api.del(`/projects/${id}`), '已删除项目', () => navigate('/projects'))}
       />
     </div>
-  );
-}
-
-interface ApplyDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: (form: { note: string | null }) => void;
-  busy: boolean;
-}
-
-function ApplyDialog({ open, onClose, onSubmit, busy }: ApplyDialogProps) {
-  const [note, setNote] = useState('');
-  return (
-    <Modal
-      open={open}
-      title="申请加入"
-      sub="Leader 会在项目页看到你的申请并做出决定。"
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy}
-            onClick={() => onSubmit({ note: note.trim() || null })}
-          >
-            提交申请
-          </button>
-        </>
-      }
-    >
-      <Field label="留言" hint="写点你能承担的部分，审批会更快。">
-        <textarea className="textarea" value={note} onChange={(event) => setNote(event.target.value)} />
-      </Field>
-    </Modal>
   );
 }
 
@@ -458,89 +392,6 @@ function DeleteProjectDialog({ open, title, busy, onClose, onConfirm }: DeletePr
     >
       <Field label="项目名称" hint={`输入「${title}」以确认删除。`}>
         <input className="input" value={typed} onChange={(event) => setTyped(event.target.value)} />
-      </Field>
-    </Modal>
-  );
-}
-
-interface EditDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: (form: EditForm) => void;
-  busy: boolean;
-  initial: EditForm;
-}
-
-function EditDialog({ open, onClose, onSubmit, busy, initial }: EditDialogProps) {
-  const [form, setForm] = useState(initial);
-  return (
-    <Modal
-      open={open}
-      title="编辑项目"
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            取消
-          </button>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => onSubmit(form)}>
-            保存
-          </button>
-        </>
-      }
-    >
-      <Field label="项目名称">
-        <input className="input" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
-      </Field>
-      <Field label="项目说明" hint="支持 Markdown。">
-        <textarea className="textarea" value={form.misc} onChange={(event) => setForm({ ...form, misc: event.target.value })} />
-      </Field>
-    </Modal>
-  );
-}
-
-interface DemandDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: (form: DemandForm) => void;
-  busy: boolean;
-}
-
-function DemandDialog({ open, onClose, onSubmit, busy }: DemandDialogProps) {
-  const [form, setForm] = useState({ title: '', detail: '' });
-  return (
-    <Modal
-      open={open}
-      title="发布需求"
-      sub="需求对平台上的所有用户开放，接单后即可开始。"
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy}
-            onClick={() => onSubmit({ title: form.title.trim(), detail: form.detail.trim() || null })}
-          >
-            发布
-          </button>
-        </>
-      }
-    >
-      <Field label="需求标题">
-        <input
-          className="input"
-          value={form.title}
-          maxLength={128}
-          placeholder="例如：需求列表增加按状态筛选"
-          onChange={(event) => setForm({ ...form, title: event.target.value })}
-        />
-      </Field>
-      <Field label="需求细节" hint="支持 Markdown：标题、粗体、列表、代码块、表格、链接。">
-        <textarea className="textarea textarea--md" value={form.detail} onChange={(event) => setForm({ ...form, detail: event.target.value })} />
       </Field>
     </Modal>
   );

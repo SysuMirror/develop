@@ -8,6 +8,8 @@ interface MarkdownEditorProps {
   /** 正文为空时右侧预览的占位文案。 */
   previewEmpty?: string;
   placeholder?: string;
+  /** 左侧文本域上方的标题，默认「内容（Markdown）」。 */
+  label?: string;
   /** 文本域下方的提示，默认给快捷键与语法说明。 */
   hint?: ReactNode;
   /** 文本域里按 Ctrl / ⌘ + Enter 时触发，通常是「保存」。 */
@@ -23,6 +25,7 @@ export function MarkdownEditor({
   onChange,
   previewEmpty = '在左侧写点什么，这里会实时渲染。',
   placeholder,
+  label = '内容（Markdown）',
   hint = '支持 Markdown（标题、列表、代码块、表格、链接）；Ctrl / ⌘ + Enter 保存。',
   onSubmitShortcut,
 }: MarkdownEditorProps) {
@@ -30,7 +33,7 @@ export function MarkdownEditor({
     <div className="editor">
       <div className="editor__pane">
         <label className="editor__label" htmlFor={id}>
-          内容（Markdown）
+          {label}
         </label>
         <textarea
           id={id}
