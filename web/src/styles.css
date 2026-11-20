@@ -688,6 +688,12 @@ button {
   background: #fff;
 }
 
+/* Markdown 正文：给出一屏能看到结构的高度。 */
+.textarea--md {
+  min-height: 150px;
+  resize: vertical;
+}
+
 .textarea {
   min-height: 96px;
   resize: vertical;

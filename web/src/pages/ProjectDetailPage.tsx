@@ -301,7 +301,9 @@ export default function ProjectDetailPage() {
             {data.demands.map((demand) => (
               <div className="list__row" key={demand.id}>
                 <div className="grow">
-                  <div className="truncate">{demand.title}</div>
+                  <div className="truncate">
+                    <Link to={`/demands/${demand.id}`}>{demand.title}</Link>
+                  </div>
                   <div className="faint">
                     <StatusBadge map={DEMAND_STATUS} value={demand.status} />
                     {demand.assignee ? ` · 由 ${displayName(demand.assignee)} 接单` : ' · 等待接单'} · <TimeAgo value={demand.createdAt} />
@@ -508,8 +510,8 @@ function DemandDialog({ open, onClose, onSubmit, busy }: DemandDialogProps) {
           onChange={(event) => setForm({ ...form, title: event.target.value })}
         />
       </Field>
-      <Field label="需求细节">
-        <textarea className="textarea" value={form.detail} onChange={(event) => setForm({ ...form, detail: event.target.value })} />
+      <Field label="需求细节" hint="支持 Markdown：标题、粗体、列表、代码块、表格、链接。">
+        <textarea className="textarea textarea--md" value={form.detail} onChange={(event) => setForm({ ...form, detail: event.target.value })} />
       </Field>
     </Modal>
   );

@@ -99,10 +99,14 @@ export default function DemandsPage() {
             {items.map((demand) => (
               <tr key={demand.id}>
                 <td>
-                  <div className="cell-title">{demand.title}</div>
+                  <Link className="cell-title" to={`/demands/${demand.id}`}>
+                    {demand.title}
+                  </Link>
                   {demand.detail ? (
-                    <div className="faint truncate" style={{ maxWidth: 380 }}>
-                      {demand.detail}
+                    <div className="faint">
+                      <Link className="btn-link" to={`/demands/${demand.id}`}>
+                        查看详情
+                      </Link>
                     </div>
                   ) : null}
                 </td>
