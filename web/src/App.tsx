@@ -6,8 +6,6 @@ import { Avatar, Skeleton, displayName } from './ui';
 import HomePage from './pages/HomePage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
-import UsersPage from './pages/UsersPage';
-import UserDetailPage from './pages/UserDetailPage';
 import DemandsPage from './pages/DemandsPage';
 import DemandDetailPage from './pages/DemandDetailPage';
 import ProfilePage from './pages/ProfilePage';
@@ -24,7 +22,6 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: '概览', end: true },
   { to: '/projects', label: '项目' },
-  { to: '/users', label: '用户' },
   { to: '/demands', label: '需求' },
   { to: '/me', label: '我的' },
 ];
@@ -135,22 +132,6 @@ export default function App() {
           element={
             <RequireAuth>
               <ProjectDetailPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="users"
-          element={
-            <RequireAuth>
-              <UsersPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="users/:id"
-          element={
-            <RequireAuth>
-              <UserDetailPage />
             </RequireAuth>
           }
         />

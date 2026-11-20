@@ -110,7 +110,7 @@ export default function DemandDetailPage() {
           <dt>发布者</dt>
           <dd>
             {demand.creator ? (
-              <Link to={`/users/${demand.creator.id}`}>{displayName(demand.creator)}</Link>
+              <span>{displayName(demand.creator)}</span>
             ) : (
               <span className="faint">未知用户</span>
             )}
@@ -119,7 +119,7 @@ export default function DemandDetailPage() {
           <dd>
             {demand.assignee ? (
               <>
-                <Link to={`/users/${demand.assignee.id}`}>{displayName(demand.assignee)}</Link>
+                <span>{displayName(demand.assignee)}</span>
                 {demand.acceptedAt ? (
                   <span className="faint">
                     {' '}

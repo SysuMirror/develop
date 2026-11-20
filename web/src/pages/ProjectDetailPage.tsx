@@ -169,10 +169,10 @@ export default function ProjectDetailPage() {
           <dt>Leader</dt>
           <dd>
             {leader ? (
-              <Link to={`/users/${leader.id}`} className="row" style={{ gap: 6, display: 'inline-flex' }}>
+              <span className="row" style={{ gap: 6, display: 'inline-flex' }}>
                 <Avatar name={displayName(leader)} src={leader.avatar} />
                 {displayName(leader)}
-              </Link>
+              </span>
             ) : (
               <span className="faint">—</span>
             )}
@@ -196,7 +196,7 @@ export default function ProjectDetailPage() {
             <div className="list__row" key={member.userId}>
               <Avatar name={displayName(member)} src={member.avatar} />
               <div className="grow">
-                <Link to={`/users/${member.userId}`}>{displayName(member)}</Link>
+                <span>{displayName(member)}</span>
                 <div className="faint">
                   加入于 <TimeAgo value={member.joinedAt} />
                 </div>
@@ -241,7 +241,7 @@ export default function ProjectDetailPage() {
                     <Avatar name={displayName(apply.user)} src={apply.user.avatar} />
                     <div className="grow">
                       <div className="truncate">
-                        <Link to={`/users/${apply.user.id}`}>{displayName(apply.user)}</Link>{' '}
+                        <span>{displayName(apply.user)}</span>{' '}
                         <StatusBadge map={APPLY_TYPE} value={apply.type} />
                         {apply.source === 'join' ? (
                           <>

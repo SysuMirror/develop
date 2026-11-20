@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useApi } from '../hooks';
 import { Badge, Empty, ROLE, Skeleton, StatusBadge, APPLY_STATUS, DEMAND_STATUS, TimeAgo, Avatar, displayName } from '../ui';
-import type { ApplyItem, DemandItem, Paged, ProjectSummary, UserListItem } from '../types';
+import type { ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
 
 interface StatProps {
   label: string;
@@ -21,7 +21,6 @@ function Stat({ label, value, hint }: StatProps) {
 }
 
 export default function HomePage() {
-  const users = useApi<Paged<UserListItem>>('/users?pageSize=1');
   const projects = useApi<Paged<ProjectSummary>>('/projects?pageSize=6');
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const waitingDemands = useApi<Paged<DemandItem>>('/demands?status=waiting&pageSize=1');
@@ -107,7 +106,6 @@ export default function HomePage() {
       </div>
 
       <div className="stat-grid">
-        <Stat label="用户" value={users.data?.total} hint="参与过项目的统一身份" />
         <Stat label="项目" value={projects.data?.total} hint="含招募中与进行中" />
         <Stat label="待审申请" value={inbox.data ? inboxItems.length : '—'} hint="等我决策的加入申请" />
         <Stat label="待接需求" value={waitingDemands.data?.total} hint="可立即接单的任务" />
