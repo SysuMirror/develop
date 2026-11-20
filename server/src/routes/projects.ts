@@ -233,6 +233,36 @@ router.post(
 );
 
 router.delete(
+  '/projects/:id',
+  wrap(async (req, res) => {
+    const project = await loadProject(req.params.id);
+    const user = req.user;
+    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
+    await requireLeader(project, user);
+    const [blocking] = await query<{ n: number | string }>(
+      "SELECT COUNT(*) AS n FROM demands WHERE project_id = ? AND status = 'accepted'",
+      [project.id],
+    );
+    if (Number(blocking?.n ?? 0) > 0) throw conflict('DEMAND_IN_PROGRESS', '项目还有进行中的需求，先完成后再删除');
+    const members = await withTx(async (conn) => {
+      const [rows] = await conn.query<RowDataPacket[]>('SELECT user_id FROM project_member WHERE project_id = ?', [
+        project.id,
+      ]);
+      await conn.query('DELETE FROM applies WHERE project_id = ?', [project.id]);
+      await conn.query('DELETE FROM demands WHERE project_id = ?', [project.id]);
+      await conn.query('DELETE FROM project_member WHERE project_id = ?', [project.id]);
+      await conn.query('DELETE FROM projects WHERE id = ?', [project.id]);
+      return rows.map((row) => String(row.user_id));
+    });
+    // 项目连同成员关系一起消失，逐个检查是否还需要开发者资格（可能仍在别的项目里）。
+    for (const memberId of new Set([...members, project.leader_id])) {
+      if (memberId) await syncAfterRemoval(memberId);
+    }
+    res.json({ ok: true });
+  }),
+);
+
+router.delete(
   '/projects/:id/members/me',
   wrap(async (req, res) => {
     const project = await loadProject(req.params.id);
