@@ -7,8 +7,8 @@ Developer 是 sse-market 的项目、申请与需求撮合平台：开发者在�
 =8080= 上同时提供 =/api= 和前端构建产物，因此只需要一个进程。
 
 硬约束：用户不是本平台的实体。唯一的用户表在 UniSSO 里，本地一律只存 =users.id=
-（也就是 OAuth 的 =sub= ，36 位字符串）。本库因此只有四张业务表 projects、project_member、
-applies、demands，外加三张辅助表：sessions（登录会话）、user_profile（展示资料缓存，见
+（也就是 OAuth 的 =sub= ，36 位字符串）。本库因此只有五张业务表 projects、project_member、
+applies、demands、demand_revision，外加三张辅助表：sessions（登录会话）、user_profile（展示资料缓存，见
 「用户目录」）、developer_qual_sync（回写 UniSSO 开发者资格的待同步队列）。是不是「开发者」
 同样不是本平台的字段，而是 UniSSO =users.is_developer= 的取值。
 
@@ -27,7 +27,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 | 发布需求 | =/projects/:id/demands/new= | 标题与 Markdown 细节；项目成员可用，发布后跳到需求详情                         |
 | 申请加入 | =/projects/:id/apply=       | 一句留言，提交后回项目页等待 leader 审批                                       |
 | 需求     | =/demands=                  | 五种状态页签与「全部 / 我发布的 / 我接的」视角；列表只读，不内联操作按钮       |
-| 需求详情 | =/demands/:id=              | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、提交、验收、挂起在这里 |
+| 需求详情 | =/demands/:id=              | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、提交、验收、挂起在这里；发布者改过正文后可看「已修改 N 次」与行级 diff |
 | 需求编辑 | =/demands/:id/edit=         | 独立编辑页：左写 Markdown、右实时预览， =Ctrl/⌘ + Enter= 保存；仅发布者可用    |
 | 我的     | =/me=                       | 待我审批、我参与的项目、个人参与的需求                                         |
 
@@ -219,6 +219,15 @@ completed；驳回把 review 退回 accepted，接单人不变；挂起记录来
 - =PATCH /api/demands/:id= ：只有发布者能改 =title= 与 =detail= ，且仅限待接单、进行中、挂起
   三种状态；待确认与已完成锁定，避免验收对象被改。标题同样受项目内唯一约束，重名返回 409
   =DUPLICATE_TITLE= ，空标题返回 400 =BAD_TITLE= 。
+- 内容真的变了才算一次修改： =demands.revision= 加一，同时在 =demand_revision= 写一条快照
+  （版本号、当时的标题与细节、改动人、时间）； =title= 与 =detail= 都没变就直接返回，
+  避免点开编辑又原样保存把版本号刷上去。发布时的原文是 =revision= 为 0 的那条，
+  所以 =revision= 的数值就是被修改的次数。
+- =GET /api/demands/:id/revisions= ：修订历史，按 =revision= 倒序返回 =items= ，每项含
+  =revision= / =title= / =detail= / =editor= / =createdAt= 。详情页选中某一版时，用相邻两版的
+  完整正文在前端算行级 diff（ =web/src/diff.ts= ，LCS），服务端只存快照、不存补丁。
+  需求详情本来就对登录开发者可读，修订历史不额外收紧权限。
+- 列表与详情都带 =revision= ；状态流转（接单、提交、验收、挂起、恢复）不产生修订。
 - =POST /api/demands/:id/accept= ：只能接 waiting 的需求，发布者也可以接自己发布的需求；写入 =user_id= 与
   =accepted_at= 。更新条件带 =AND status='waiting'= ，并发接单只有一方成功。
 - =POST /api/demands/:id/submit= ：只有接单人可以提交完成， accepted → review，写入 =submitted_at= 。
@@ -465,7 +474,18 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
      status : waiting / accepted / review / completed / suspended\l
      status_before_suspend : 挂起来源，可空\l
      created_at / accepted_at / submitted_at / completed_at\l
+     revision : 当前版本号，等于修改次数\l
      UNIQUE (project_id, title)" ];
+
+    demand_revision
+    [ label="demand_revision |
+     id : [PK]\l
+     demand_id : [FK] demands.id\l
+     revision : 版本号，0 为发布时的原文\l
+     title / detail : 该版本的完整正文\l
+     editor_id : [FK] users.id\l
+     created_at\l
+     UNIQUE (demand_id, revision)" ];
 
     users -> projects [style=dashed, label="leader_id / created_by"];
     users -> project_member [style=dashed];
@@ -475,6 +495,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
     projects -> project_member [arrowtail=teetee, arrowhead=crowtee];
     projects -> applies [arrowtail=teetee, arrowhead=crowodot];
     projects -> demands [arrowtail=teetee, arrowhead=crowodot];
+    demands -> demand_revision [arrowtail=teetee, arrowhead=crowtee];
   }
 #+end_src
 
@@ -490,7 +511,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 =applies.type= 枚举里仍保留 =leader= ，但接口只接受 =participant= —— 项目始终有一个 leader，不再走申请。
 
 建表脚本是 =server/src/schema.sql= ，由 =npm run migrate= 执行：只建缺失的表、补缺失的列
-（例如 =sessions.auth_method= / =sessions.developer= ），不改已有列定义。
+（例如 =sessions.auth_method= / =sessions.developer= / =demands.revision= ），不改已有列定义。
 从「本地有 developers 表」的旧库升级没有迁移脚本（用户实体已搬到 UniSSO），旧库直接丢掉重建即可。
 
 * 十三、API 清单
@@ -531,9 +552,10 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | DELETE | =/api/applies/:id=                  | 本人   | 撤回 waiting 申请                      |
 | GET    | =/api/demands=                      | 开发者 | 需求列表， =status= / =scope= / =q= / 分页 |
 | GET    | =/api/demands/:id=                  | 开发者 | 单条需求，404 为 =NOT_FOUND=           |
+| GET    | =/api/demands/:id/revisions=        | 开发者 | 修订历史，按版本倒序，含每版完整正文   |
 | POST   | =/api/projects/:id/demands=         | 成员   | 发布需求，同项目内标题唯一             |
 | POST   | =/api/demands/:id/accept=           | 开发者 | 接单，也可以接自己发布的               |
-| PATCH  | =/api/demands/:id=                  | 发布者 | 改标题与详情，仅待接单 / 进行中 / 挂起 |
+| PATCH  | =/api/demands/:id=                  | 发布者 | 改标题与详情，仅待接单 / 进行中 / 挂起；内容变化才计一次修改 |
 | POST   | =/api/demands/:id/submit=           | 接单人 | 提交完成，进入待确认                   |
 | POST   | =/api/demands/:id/confirm=          | 发布者 | 发布者 / leader 验收通过               |
 | POST   | =/api/demands/:id/reject=           | 发布者 | 驳回，退回进行中                       |
@@ -592,6 +614,8 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       api.ts          # fetch 封装与错误码文案
       auth.tsx        # 登录态
       hooks.ts        # 数据请求 hook
+      diff.ts         # 行级 LCS diff，需求修订对比用
+      demand-revisions.tsx # 需求修改记录时间线与 diff 面板
       types.ts        # 接口返回值的类型定义
       ui.tsx          # 表格 / 徽章 / 空态等基础组件
       markdown.tsx    # 正文的 Markdown 渲染（react-markdown + remark-gfm）
