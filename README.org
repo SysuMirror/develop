@@ -83,8 +83,10 @@ external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden
 1. =POST ${SSO_ISSUER}/api/oauth/users/list= （Basic 认证，复用 =SSO_CLIENT_ID= /
    =SSO_CLIENT_SECRET= ）——一次拿全量。它是 M2M 接口，只对内接应用开放；本应用是
    =kind= 为 =external= ，调用会得到 =403 password_verify_forbidden= ，属于预期行为。
-   没有分页也没有单查，所以结果缓存在进程内：惰性拉取（启动不预取、无定时刷新）、
-   =SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示不缓存）内复用、并发请求共享同一次拉取。
+   没有分页也没有单查，所以结果缓存在进程内：=SSO_DIRECTORY_TTL_SECONDS= （默认 60，0 表示
+   不缓存）内复用、并发请求共享同一次拉取。请求路径从不等待这个外部调用：命中缓存就用缓存，
+   过期则由后台刷新（进程启动时也预取一次）。拉取失败后 =SSO_DIRECTORY_RETRY_SECONDS= （默认
+   30）内直接走 =user_profile= 降级，不再每个请求重打一次 SSO。
 2. =user_profile= 表 —— 登录回调拿到 =userinfo= 后抄一份 =name/avatar/email= 落库
    （ =server/src/directory.ts= 的 =remember()= ，写失败只记日志不影响登录）。
 
@@ -386,6 +388,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | =SSO_SCOPE=                                                                | 否       | =openid profile:username profile:name profile:avatar email sse_identity=       |
 | =SSO_DEVELOPER_TTL_SECONDS=                                                | 否       | =60= ；0 表示每次请求都查 userinfo                                             |
 | =SSO_DIRECTORY_TTL_SECONDS=                                                | 否       | =60= ；0 表示不缓存，每次拉全量目录                                            |
+| =SSO_DIRECTORY_RETRY_SECONDS=                                              | 否       | =30= ，目录拉取失败后多久才再试；期间直接用 =user_profile= 降级               |
 | =SSO_WRITE_TIMEOUT_MS=                                                     | 否       | =5000= ，资格写入超时                                                          |
 | =QUAL_SYNC_INTERVAL_MS=                                                    | 否       | =15000= ；小于等于 0 时关闭后台任务                                            |
 | =DEV_LOGIN=                                                                | 否       | =1= 强制开启演示登录（生产应设 0）， =0= 强制关闭，留空则仅在未配置 SSO 时开启 |
