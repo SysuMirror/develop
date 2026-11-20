@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { api, messageOf, qs } from '../api';
 import { useAuth } from '../auth';
-import { DemandActions } from '../demand-actions';
 import { DEMAND_MAX_PAGES, DEMAND_PAGE_SIZE, sortByTimeDesc, useApi, useDemandFeed } from '../hooks';
 import {
   APPLY_TYPE,
@@ -26,13 +25,7 @@ function demandTime(demand: DemandItem): string | null {
   return demand.acceptedAt;
 }
 
-function DemandRow({
-  demand,
-  action,
-}: {
-  demand: DemandItem;
-  action?: ReactNode;
-}) {
+function DemandRow({ demand }: { demand: DemandItem }) {
   return (
     <div className="list__row">
       <div className="grow">
@@ -47,7 +40,6 @@ function DemandRow({
       </div>
       <div className="row" style={{ gap: 8 }}>
         <StatusBadge map={DEMAND_STATUS} value={demand.status} />
-        {action}
       </div>
     </div>
   );
@@ -190,7 +182,7 @@ export default function ProfilePage() {
       <div className="panel">
         <div className="list">
           {ongoing.map((demand) => (
-            <DemandRow key={demand.id} demand={demand} action={<DemandActions demand={demand} onChanged={feed.reload} empty={null} />} />
+            <DemandRow key={demand.id} demand={demand} />
           ))}
           {completed.map((demand) => (
             <DemandRow key={demand.id} demand={demand} />
