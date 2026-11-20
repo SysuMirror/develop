@@ -65,13 +65,6 @@ export default function DemandsPage() {
                   <Link className="cell-title" to={`/demands/${demand.id}`}>
                     {demand.title}
                   </Link>
-                  {demand.detail ? (
-                    <div className="faint">
-                      <Link className="btn-link" to={`/demands/${demand.id}`}>
-                        查看详情
-                      </Link>
-                    </div>
-                  ) : null}
                 </td>
                 <td>
                   <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
