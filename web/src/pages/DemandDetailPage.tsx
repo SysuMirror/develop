@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, messageOf } from '../api';
 import { DemandActions } from '../demand-actions';
+import { DemandEditDialog } from '../demand-edit-dialog';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
 import { DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
@@ -9,6 +11,7 @@ import type { DemandItem } from '../types';
 export default function DemandDetailPage() {
   const { id } = useParams();
   const { data, loading, error, reload } = useApi<DemandItem>(`/demands/${id}`);
+  const [editing, setEditing] = useState(false);
 
   if (loading) {
     return (
@@ -51,7 +54,7 @@ export default function DemandDetailPage() {
           </div>
         </div>
         <div className="row">
-          <DemandActions demand={demand} onChanged={reload} empty={null} />
+          <DemandActions demand={demand} onChanged={reload} onEdit={() => setEditing(true)} empty={null} />
         </div>
       </div>
 
@@ -103,6 +106,8 @@ export default function DemandDetailPage() {
           ) : null}
         </dl>
       </div>
+
+      {editing ? <DemandEditDialog demand={demand} onClose={() => setEditing(false)} onSaved={reload} /> : null}
 
       <div className="section-head">
         <h2>详情</h2>

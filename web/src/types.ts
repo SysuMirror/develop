@@ -85,6 +85,7 @@ export interface ProjectDetail extends ProjectSummary {
 
 // 服务端按当前登录者算好的动作开关，前端不再自己推断权限。
 export interface DemandPermissions {
+  canEdit: boolean;
   canAccept: boolean;
   canSubmit: boolean;
   canReview: boolean;

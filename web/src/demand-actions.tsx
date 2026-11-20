@@ -46,17 +46,20 @@ function actionsOf(demand: DemandItem): DemandAction[] {
 export function DemandActions({
   demand,
   onChanged,
+  onEdit,
   empty = '—',
 }: {
   demand: DemandItem;
   onChanged: () => void;
+  onEdit?: (demand: DemandItem) => void;
   empty?: string | null;
 }) {
   const { push } = useToast();
   const [busy, setBusy] = useState(false);
   const actions = actionsOf(demand);
+  const editable = demand.permissions.canEdit && onEdit !== undefined;
 
-  if (actions.length === 0) return empty ? <span className="faint">{empty}</span> : null;
+  if (actions.length === 0 && !editable) return empty ? <span className="faint">{empty}</span> : null;
 
   async function run(action: DemandAction) {
     if (action.confirm && !window.confirm(action.confirm)) return;
@@ -74,6 +77,11 @@ export function DemandActions({
 
   return (
     <div className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      {editable ? (
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => onEdit?.(demand)}>
+          编辑
+        </button>
+      ) : null}
       {actions.map((action) => (
         <button
           key={action.path}

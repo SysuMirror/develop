@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { qs } from '../api';
 import { DemandActions } from '../demand-actions';
+import { DemandEditDialog } from '../demand-edit-dialog';
 import { useApi, useDebounced } from '../hooks';
 import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem, Paged } from '../types';
@@ -38,6 +39,7 @@ export default function DemandsPage() {
     `/demands${qs({ status, scope, q, page, pageSize })}`,
   );
   const items = data?.items ?? [];
+  const [editing, setEditing] = useState<DemandItem | null>(null);
 
   let content: ReactNode;
   if (loading) {
@@ -87,7 +89,7 @@ export default function DemandsPage() {
                   </div>
                 </td>
                 <td className="right">
-                  <DemandActions demand={demand} onChanged={reload} />
+                  <DemandActions demand={demand} onChanged={reload} onEdit={setEditing} />
                 </td>
               </tr>
             ))}
@@ -155,6 +157,9 @@ export default function DemandsPage() {
 
       {content}
       <Pager page={data?.page ?? page} pageSize={data?.pageSize ?? pageSize} total={data?.total ?? 0} onPage={setPage} />
+      {editing ? (
+        <DemandEditDialog demand={editing} onClose={() => setEditing(null)} onSaved={reload} />
+      ) : null}
     </div>
   );
 }
