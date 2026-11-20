@@ -79,7 +79,7 @@ router.post(
     await requireMember(project.id, user);
     const title = String(req.body?.title ?? '').trim();
     const detail = req.body?.detail == null ? null : String(req.body.detail).trim();
-    if (!title || title.length > 200) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 200 字');
+    if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
     const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ?', [
       project.id,
       title,

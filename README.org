@@ -195,7 +195,7 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 
 - =GET /api/demands= ： =status= 取 =waiting= / =accepted= / =completed= ， =q= 匹配标题；
   排序是 waiting → accepted → completed，同状态按发布时间倒序。
-- =POST /api/projects/:id/demands= ：项目成员才能发布， =title= 必填且不超过 200 字， =detail= 可选。
+- =POST /api/projects/:id/demands= ：项目成员才能发布， =title= 必填且不超过 128 字， =detail= 可选。
   同一项目内标题唯一（大小写不敏感），重名返回 409 =DUPLICATE_TITLE= ；不同项目可以各自发布
   同名需求，已完成的需求也同样占着这个名字。
 - =POST /api/demands/:id/accept= ：只能接 waiting 的需求，不能接自己发布的；写入 =user_id= 与
@@ -205,7 +205,7 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 
 | 状态 | code              | 触发条件                                    |
 |------+-------------------+---------------------------------------------|
-|  400 | =BAD_TITLE=       | 标题为空或超过 200 字                       |
+|  400 | =BAD_TITLE=       | 标题为空或超过 128 字                       |
 |  403 | =NOT_MEMBER=      | 非项目成员发布需求                          |
 |  403 | =SELF_ACCEPT=     | 接自己发布的需求                            |
 |  403 | =NOT_ALLOWED=     | 非发布者、非接单人、非项目 leader 标记完成  |
