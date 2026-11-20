@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { qs } from '../api';
-import { DemandActions } from '../demand-actions';
-import { DemandEditDialog } from '../demand-edit-dialog';
 import { useApi, useDebounced } from '../hooks';
 import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem, Paged } from '../types';
@@ -35,11 +33,10 @@ export default function DemandsPage() {
   const [page, setPage] = useState(1);
   const q = useDebounced(term);
   const pageSize = 15;
-  const { data, loading, error, reload } = useApi<Paged<DemandItem>>(
+  const { data, loading, error } = useApi<Paged<DemandItem>>(
     `/demands${qs({ status, scope, q, page, pageSize })}`,
   );
   const items = data?.items ?? [];
-  const [editing, setEditing] = useState<DemandItem | null>(null);
 
   let content: ReactNode;
   if (loading) {
@@ -59,7 +56,6 @@ export default function DemandsPage() {
               <th>发布者</th>
               <th>接单人</th>
               <th>状态</th>
-              <th className="right">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -87,9 +83,6 @@ export default function DemandsPage() {
                   <div className="faint">
                     <TimeAgo value={demand.createdAt} />
                   </div>
-                </td>
-                <td className="right">
-                  <DemandActions demand={demand} onChanged={reload} onEdit={setEditing} />
                 </td>
               </tr>
             ))}
@@ -157,9 +150,6 @@ export default function DemandsPage() {
 
       {content}
       <Pager page={data?.page ?? page} pageSize={data?.pageSize ?? pageSize} total={data?.total ?? 0} onPage={setPage} />
-      {editing ? (
-        <DemandEditDialog demand={editing} onClose={() => setEditing(null)} onSaved={reload} />
-      ) : null}
     </div>
   );
 }
