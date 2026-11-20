@@ -1,83 +1,13 @@
-import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { api, messageOf, qs } from '../api';
+import { qs } from '../api';
 import { useAuth } from '../auth';
-import { useApi } from '../hooks';
+import { DEMAND_MAX_PAGES, DEMAND_PAGE_SIZE, latest, useApi, useDemandFeed } from '../hooks';
 import { APPLY_TYPE, DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
 
 const PREVIEW = 5;
 const PAGE_SIZE = 100;
-// /api/demands 的 pageSize 上限是 100，且排序按状态而非时间；
-// 首页最多翻 5 页，超出部分不拉，避免一次打开首页发出无界请求。
-const MAX_PAGES = 5;
-
-function timeOf(value: string | null | undefined): number {
-  const time = value ? new Date(value).getTime() : 0;
-  return Number.isNaN(time) ? 0 : time;
-}
-
-function latest<T>(items: T[], at: (item: T) => string | null | undefined, limit = PREVIEW): T[] {
-  return [...items].sort((a, b) => timeOf(at(b)) - timeOf(at(a))).slice(0, limit);
-}
-
-interface DemandFeedState {
-  items: DemandItem[];
-  total: number;
-  truncated: boolean;
-  loading: boolean;
-  error: string | null;
-}
-
-interface DemandFeed extends DemandFeedState {
-  reload: () => void;
-}
-
-// 需求列表没有「按接单人」「按完成时间」的筛选参数，只能分页拉回来在前端切。
-function useDemandFeed(): DemandFeed {
-  const [state, setState] = useState<DemandFeedState>({
-    items: [],
-    total: 0,
-    truncated: false,
-    loading: true,
-    error: null,
-  });
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    let alive = true;
-    setState((prev) => ({ ...prev, loading: true }));
-    (async () => {
-      const collected: DemandItem[] = [];
-      let total = 0;
-      for (let page = 1; page <= MAX_PAGES; page += 1) {
-        const data = await api.get<Paged<DemandItem>>(`/demands${qs({ page, pageSize: PAGE_SIZE })}`);
-        total = data.total;
-        collected.push(...data.items);
-        if (data.items.length === 0 || collected.length >= total) break;
-      }
-      if (alive) {
-        setState({
-          items: collected,
-          total,
-          truncated: collected.length < total,
-          loading: false,
-          error: null,
-        });
-      }
-    })().catch((error: unknown) => {
-      if (alive) {
-        setState({ items: [], total: 0, truncated: false, loading: false, error: messageOf(error) });
-      }
-    });
-    return () => {
-      alive = false;
-    };
-  }, [tick]);
-
-  return { ...state, reload: () => setTick((value) => value + 1) };
-}
 
 interface PreviewPanelProps {
   title: string;
@@ -145,17 +75,17 @@ export default function HomePage() {
 
   const inboxItems = inbox.data?.items ?? [];
   const myDemands = feed.items.filter((item) => item.status === 'accepted' && item.assignee?.id === myId);
-  const ongoing = latest(myDemands, (item) => item.acceptedAt ?? item.createdAt);
-  const published = latest(feed.items, (item) => item.createdAt);
+  const ongoing = latest(myDemands, (item) => item.acceptedAt ?? item.createdAt, PREVIEW);
+  const published = latest(feed.items, (item) => item.createdAt, PREVIEW);
   const completed = feed.items.filter((item) => item.status === 'completed');
-  const resolved = latest(completed, (item) => item.completedAt ?? item.createdAt);
+  const resolved = latest(completed, (item) => item.completedAt ?? item.createdAt, PREVIEW);
   const leading = myProjects.data?.items ?? [];
-  const createdProjects = latest(allProjects.data?.items ?? [], (item) => item.createdAt);
+  const createdProjects = latest(allProjects.data?.items ?? [], (item) => item.createdAt, PREVIEW);
   // leader 与 participant 互斥，两个 total 相加即「我加入的全部项目」。
   const joinedCount = (myProjects.data?.total ?? 0) + (memberProjects.data?.total ?? 0);
   const joinedLoading = myProjects.loading || memberProjects.loading;
 
-  const feedHint = feed.truncated ? `（基于最近 ${MAX_PAGES * PAGE_SIZE} 条）` : '';
+  const feedHint = feed.truncated ? `（基于最近 ${DEMAND_MAX_PAGES * DEMAND_PAGE_SIZE} 条）` : '';
 
   const stats = [
     {
