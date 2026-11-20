@@ -179,7 +179,7 @@ export default function ProjectsPage() {
             onChange={(event) => setForm({ ...form, title: event.target.value })}
           />
         </Field>
-        <Field label="项目说明" hint="一两句话说明目标、技术栈与协作方式。">
+        <Field label="项目说明" hint="支持 Markdown；列表里只显示纯文本摘要。">
           <textarea
             className="textarea"
             value={form.misc}

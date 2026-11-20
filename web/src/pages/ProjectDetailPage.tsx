@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, messageOf } from '../api';
 import { useAuth } from '../auth';
 import { useApi } from '../hooks';
+import { MarkdownText } from '../markdown';
 import {
   APPLY_TYPE,
   DEMAND_STATUS,
@@ -102,7 +103,6 @@ export default function ProjectDetailPage() {
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
           <h1 className="page-title">{data.title}</h1>
-          <p className="page-sub">{data.misc || '暂无项目说明。'}</p>
           <div className="row" style={{ marginTop: 8 }}>
             <Badge tone="gray">{data.memberCount} 位成员</Badge>
             <Badge tone={data.waitingDemandCount ? 'amber' : 'gray'}>{data.waitingDemandCount} 个待接需求</Badge>
@@ -159,6 +159,13 @@ export default function ProjectDetailPage() {
           <dt>我的角色</dt>
           <dd>{data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : <span className="faint">非成员</span>}</dd>
         </dl>
+      </div>
+
+      <div className="section-head">
+        <h2>项目说明</h2>
+      </div>
+      <div className="panel">
+        <MarkdownText source={data.misc} empty="发布时没有填写项目说明。" />
       </div>
 
       <div className="section-head">
@@ -485,7 +492,7 @@ function EditDialog({ open, onClose, onSubmit, busy, initial }: EditDialogProps)
       <Field label="项目名称">
         <input className="input" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
       </Field>
-      <Field label="项目说明">
+      <Field label="项目说明" hint="支持 Markdown。">
         <textarea className="textarea" value={form.misc} onChange={(event) => setForm({ ...form, misc: event.target.value })} />
       </Field>
     </Modal>
