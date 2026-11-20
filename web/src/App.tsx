@@ -1,7 +1,6 @@
 import { NavLink, Outlet, Route, Routes, Link, Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth } from './auth';
-import { useDebugEnabled } from './debug';
 import { Avatar, Skeleton, displayName } from './ui';
 import HomePage from './pages/HomePage';
 import ProjectsPage from './pages/ProjectsPage';
@@ -11,7 +10,6 @@ import DemandDetailPage from './pages/DemandDetailPage';
 import ProfilePage from './pages/ProfilePage';
 import LoginPage from './pages/LoginPage';
 import NoQualificationPage from './pages/NoQualificationPage';
-import DebugApiPage from './pages/DebugApiPage';
 
 interface NavItem {
   to: string;
@@ -28,8 +26,6 @@ const NAV: NavItem[] = [
 
 function Header() {
   const { user, logout } = useAuth();
-  const debug = useDebugEnabled();
-  const nav = debug ? [...NAV, { to: '/debug/api', label: '接口自检' }] : NAV;
   return (
     <header className="site-header">
       <div className="site-header__inner">
@@ -38,7 +34,7 @@ function Header() {
           <span className="brand__mono">developer</span>
         </Link>
         <nav className="site-nav">
-          {nav.map((item) => (
+          {NAV.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
               {item.label}
             </NavLink>
@@ -159,8 +155,6 @@ export default function App() {
             </RequireAuth>
           }
         />
-        {/* 运维自检页：故意不包 RequireAuth，登录链路坏了也要能打开看 401。 */}
-        <Route path="debug/api" element={<DebugApiPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
