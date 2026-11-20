@@ -21,7 +21,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 | 概览     | =/=             | 与我有关 / 与我无关两块：我的待办与项目、最近发生的事                |
 | 登录     | =/login=        | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                 |
 | 项目列表 | =/projects=     | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页 |
-| 项目详情 | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、转让、删除项目、移除成员          |
+| 项目详情 | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、删除项目、移除成员                |
 | 需求     | =/demands=      | 按状态（待接单 / 进行中 / 已完成）与标题筛选；接单、标记完成         |
 | 需求详情 | =/demands/:id=  | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、标记完成     |
 | 我的     | =/me=           | 待我审批、我参与的项目、个人参与的需求                               |
@@ -122,11 +122,9 @@ external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden
 
 创建项目 =POST /api/projects= ： =title= 必填且不超过 128 字， =misc= 可选；同一事务里写入
 projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建者即刻成为 leader。项目始终
-恰好有一个 leader：没有「释放」，leader 要离开只能先转让，或者把整个项目删掉。
+恰好有一个 leader：没有「释放」也不支持转让，leader 要离开只能把整个项目删掉。
 
 - =PATCH /api/projects/:id= ：只有 leader 可改 =title= / =misc= ；没有可更新字段时 400。
-- =POST /api/projects/:id/transfer= ：把 leader 转给项目内已有成员——原 leader 降为
-  =participant= 、目标升为 =leader= 、 =projects.leader_id= 同步更新。
 - =DELETE /api/projects/:id= ：只有 leader 可删。项目里还有 =accepted= 需求时返回 409
   =DEMAND_IN_PROGRESS= ；否则在一个事务里删掉 applies、demands、project_member 与 projects，
   再对每个被移除的成员做一次资格回收（见下）。
@@ -134,8 +132,8 @@ projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建�
 
 ** 成员的退出与被移除
 
-=DELETE /api/projects/:id/members/me= 退出项目。leader 必须先转让或删除项目，否则 409
-=LEADER_MUST_TRANSFER= 。
+=DELETE /api/projects/:id/members/me= 退出项目。leader 不能退出，只能删除项目，否则 409
+=LEADER_CANNOT_LEAVE= 。
 
 以上三种「离开项目」（退出、被移除、项目被删除）之后都会调用 =syncAfterRemoval= ：若该用户已不属于
 任何项目，就排一条 =is_developer= 为 =false= 的资格回写。
@@ -146,11 +144,11 @@ projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建�
 |------+------------------------+--------------------------------------------|
 |  400 | =BAD_TITLE=            | 标题为空或超过 128 字                      |
 |  400 | =NOTHING_TO_UPDATE=    | PATCH 没有任何可更新字段                   |
-|  403 | =NOT_LEADER=           | 非 leader 改项目、转让、删除项目、移除成员 |
+|  403 | =NOT_LEADER=           | 非 leader 改项目、删除项目、移除成员       |
 |  403 | =CANNOT_FIRE_LEADER=   | 移除目标就是 leader                        |
 |  404 | =NOT_FOUND=            | 项目不存在，或目标用户不是项目成员         |
 |  409 | =DEMAND_IN_PROGRESS=   | 项目还有进行中的需求时删除项目             |
-|  409 | =LEADER_MUST_TRANSFER= | leader 直接退出项目                        |
+|  409 | =LEADER_CANNOT_LEAVE=  | leader 直接退出项目                        |
 
 * 四、申请
 
@@ -225,7 +223,7 @@ projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建�
 | 未登录           | —                                                                   | 只能打开 =/login= 与 =/api/health=                      |
 | 普通统一身份用户 | UniSSO 登录成功                                                     | 已登录但 =developer= 不为严格 =true= 时业务接口一律 403 |
 | 开发者           | UniSSO 的 =users.is_developer= 为 =true= ；申请通过后由资格回写授予 | 项目 / 申请 / 需求全部读写                              |
-| 项目 leader      | 建项目即成为 leader；或经转让                                       | 改项目信息、审批申请、移除成员、转让、删除项目          |
+| 项目 leader      | 建项目即成为 leader                                                 | 改项目信息、审批申请、移除成员、删除项目                |
 | 项目成员         | 申请通过后写入 =project_member=                                     | 发布需求、标记需求完成、自行退出项目                    |
 | 需求接单人       | 接单（写入 =demands.user_id= ）                                     | 标记自己接的需求完成                                    |
 
@@ -508,9 +506,8 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | POST   | =/api/projects=                     | 开发者 | 建项目，创建者成为 leader              |
 | GET    | =/api/projects/:id=                 | 开发者 | 详情 + 成员 + 需求 + permissions       |
 | PATCH  | =/api/projects/:id=                 | leader | 改 title / misc                        |
-| POST   | =/api/projects/:id/transfer=        | leader | 转让给项目内成员                       |
 | DELETE | =/api/projects/:id=                 | leader | 删除项目（没有进行中的需求时）         |
-| DELETE | =/api/projects/:id/members/me=      | 成员   | 退出项目（leader 需先转让或删除项目）  |
+| DELETE | =/api/projects/:id/members/me=      | 成员   | 退出项目（leader 只能删除项目）        |
 | DELETE | =/api/projects/:id/members/:userId= | leader | 移除成员，不能移除 leader              |
 | POST   | =/api/projects/:id/applies=         | 开发者 | 提交 participant 申请                  |
 | GET    | =/api/applies/mine=                 | 开发者 | 自己的申请（最近 100 条）              |
@@ -564,7 +561,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       schema.sql      # 建表脚本
       demo-users.ts   # DEV_LOGIN 演示身份
       routes/
-        projects.ts   # 项目 CRUD、转让、删除、成员移除
+        projects.ts   # 项目 CRUD、删除、成员移除
         applies.ts    # 申请、审批、撤回
         demands.ts    # 需求发布、接单、完成
         join.ts       # join 平台接入（共享密钥）
