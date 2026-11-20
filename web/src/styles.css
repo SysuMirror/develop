@@ -523,6 +523,50 @@ button {
   color: var(--ink-soft);
 }
 
+.entry-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+
+.entry-card:hover {
+  border-color: var(--ink-faint);
+  transform: translateY(-1px);
+  color: inherit;
+}
+
+.entry-card__title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.entry-card__desc {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+}
+
+.entry-card__more {
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
 .project-cards {
   display: grid;
   gap: 12px;
