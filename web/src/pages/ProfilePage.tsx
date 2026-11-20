@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { api, messageOf, qs } from '../api';
 import { useAuth } from '../auth';
-import { useApi } from '../hooks';
+import { DEMAND_MAX_PAGES, DEMAND_PAGE_SIZE, sortByTimeDesc, useApi, useDemandFeed } from '../hooks';
 import {
-  APPLY_STATUS,
   APPLY_TYPE,
+  DEMAND_STATUS,
   ROLE,
   Avatar,
   Badge,
@@ -17,29 +17,66 @@ import {
   displayName,
   useToast,
 } from '../ui';
-import type { ApplyItem, Paged, ProjectSummary } from '../types';
+import type { ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
+
+function DemandRow({
+  demand,
+  action,
+}: {
+  demand: DemandItem;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="list__row">
+      <div className="grow">
+        <Link className="truncate" to={`/demands/${demand.id}`} style={{ fontWeight: 600 }}>
+          {demand.title}
+        </Link>
+        <div className="faint truncate">
+          <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
+          {' · '}
+          <TimeAgo value={demand.status === 'completed' ? demand.completedAt : demand.acceptedAt} />
+        </div>
+      </div>
+      <div className="row" style={{ gap: 8 }}>
+        <StatusBadge map={DEMAND_STATUS} value={demand.status} />
+        {action}
+      </div>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const { user } = useAuth();
   const { push } = useToast();
-  const mine = useApi<{ items: ApplyItem[] }>('/applies/mine');
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const projects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'all', pageSize: 50 })}`);
+  const feed = useDemandFeed();
   const [busy, setBusy] = useState(false);
 
   const myProjects = (projects.data?.items ?? []).filter((project) => project.myRole);
   const inboxItems = inbox.data?.items ?? [];
-  const myApplies = mine.data?.items ?? [];
+  const myDemands = feed.items.filter((demand) => demand.assignee?.id === user?.id);
+  const ongoing = sortByTimeDesc(
+    myDemands.filter((demand) => demand.status === 'accepted'),
+    (demand) => demand.acceptedAt ?? demand.createdAt,
+  );
+  const completed = sortByTimeDesc(
+    myDemands.filter((demand) => demand.status === 'completed'),
+    (demand) => demand.completedAt ?? demand.createdAt,
+  );
+  const feedHint = feed.truncated ? `（基于最近 ${DEMAND_MAX_PAGES * DEMAND_PAGE_SIZE} 条）` : '';
 
-  async function act(path: string, method: 'POST' | 'DELETE', okMessage: string) {
+  async function act(path: string, method: 'POST' | 'DELETE', okMessage: string, after?: () => void) {
     setBusy(true);
     try {
       if (method === 'DELETE') await api.del(path);
       else await api.post(path);
       push(okMessage, 'success');
-      mine.reload();
       inbox.reload();
       projects.reload();
+      feed.reload();
+      after?.();
     } catch (error) {
       push(messageOf(error), 'error');
     } finally {
@@ -108,61 +145,6 @@ export default function ProfilePage() {
     );
   }
 
-  let mineBlock: ReactNode;
-  if (mine.loading) {
-    mineBlock = <Skeleton rows={2} />;
-  } else if (myApplies.length === 0) {
-    mineBlock = <Empty title="还没有申请" hint="在项目页点「申请加入」即可提交。" />;
-  } else {
-    mineBlock = (
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>项目</th>
-              <th>类型</th>
-              <th>状态</th>
-              <th className="right">时间</th>
-              <th className="right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {myApplies.map((apply) => (
-              <tr key={apply.id}>
-                <td>
-                  <Link to={`/projects/${apply.project.id}`}>{apply.project.title}</Link>
-                </td>
-                <td>
-                  <StatusBadge map={APPLY_TYPE} value={apply.type} />
-                </td>
-                <td>
-                  <StatusBadge map={APPLY_STATUS} value={apply.status} />
-                </td>
-                <td className="right">
-                  <TimeAgo value={apply.createdAt} />
-                </td>
-                <td className="right">
-                  {apply.status === 'waiting' ? (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm btn-danger"
-                      disabled={busy}
-                      onClick={() => act(`/applies/${apply.id}`, 'DELETE', '已撤回申请')}
-                    >
-                      撤回
-                    </button>
-                  ) : (
-                    <span className="faint">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
   let projectsBlock: ReactNode;
   if (projects.loading) {
     projectsBlock = <Skeleton rows={2} />;
@@ -189,12 +171,47 @@ export default function ProfilePage() {
     );
   }
 
+  let demandsBlock: ReactNode;
+  if (feed.loading) {
+    demandsBlock = <Skeleton rows={2} />;
+  } else if (feed.error) {
+    demandsBlock = <div className="notice notice-error">{feed.error}</div>;
+  } else if (myDemands.length === 0) {
+    demandsBlock = <Empty title="还没有接下需求" hint="在需求页接单后，会出现在这里。" />;
+  } else {
+    demandsBlock = (
+      <div className="panel">
+        <div className="list">
+          {ongoing.map((demand) => (
+            <DemandRow
+              key={demand.id}
+              demand={demand}
+              action={
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy}
+                  onClick={() => act(`/demands/${demand.id}/complete`, 'POST', '需求已标记完成')}
+                >
+                  标记完成
+                </button>
+              }
+            />
+          ))}
+          {completed.map((demand) => (
+            <DemandRow key={demand.id} demand={demand} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="page-head">
         <div>
           <h1 className="page-title">我的</h1>
-          <p className="page-sub">你发出的申请、等你审批的申请，以及你参与的项目。</p>
+          <p className="page-sub">等你审批的申请、你参与的项目，以及你接下的需求。</p>
         </div>
         <div className="row">
           <Avatar name={displayName(user)} src={user?.avatar} size="lg" />
@@ -212,16 +229,19 @@ export default function ProfilePage() {
       {inboxBlock}
 
       <div className="section-head">
-        <h2>我发出的申请</h2>
-        <span className="faint">{myApplies.length} 条</span>
-      </div>
-      {mineBlock}
-
-      <div className="section-head">
         <h2>我参与的项目</h2>
         <span className="faint">{myProjects.length} 个</span>
       </div>
       {projectsBlock}
+
+      <div className="section-head">
+        <h2>个人参与的需求</h2>
+        <span className="faint">
+          {feed.loading ? '—' : `进行中 ${ongoing.length} 个 · 已完成 ${completed.length} 个`}
+          {feedHint}
+        </span>
+      </div>
+      {demandsBlock}
     </div>
   );
 }
