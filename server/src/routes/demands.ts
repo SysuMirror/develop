@@ -3,7 +3,7 @@ import { loadProject, requireMember } from '../access.ts';
 import { isDuplicateEntry, one, query, withTx } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
-import type { DemandJoinedRow, DemandRow, DemandStatus, DirectoryUser } from '../types.ts';
+import type { DemandJoinedRow, DemandRevisionRow, DemandRow, DemandStatus, DirectoryUser } from '../types.ts';
 
 const router = Router();
 
@@ -132,6 +132,31 @@ router.get(
   wrap(async (req, res) => {
     const demand = await loadJoinedDemand(Number(req.params.id));
     res.json((await mapDemands([demand], req.user?.id ?? null))[0]);
+  }),
+);
+
+// 修订历史：每版完整正文，diff 由前端对相邻两版算。需求详情本来就对登录开发者可读，这里不额外收紧。
+router.get(
+  '/demands/:id/revisions',
+  wrap(async (req, res) => {
+    const demand = await loadJoinedDemand(Number(req.params.id));
+    const rows = await query<DemandRevisionRow>(
+      `SELECT id, demand_id, revision, title, detail, editor_id, created_at
+         FROM demand_revision
+        WHERE demand_id = ?
+        ORDER BY revision DESC`,
+      [demand.id],
+    );
+    const people = await getUsers(rows.map((row) => row.editor_id));
+    res.json({
+      items: rows.map((row) => ({
+        revision: Number(row.revision),
+        title: row.title,
+        detail: row.detail,
+        editor: userRef(row.editor_id, row.editor_id ? people.get(row.editor_id) : null),
+        createdAt: row.created_at,
+      })),
+    });
   }),
 );
 
