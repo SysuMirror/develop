@@ -23,6 +23,51 @@ async function ensureColumn(table: string, column: string, alterStatement: strin
   return true;
 }
 
+// 索引同理：CREATE TABLE IF NOT EXISTS 不会给旧表加索引。
+async function ensureIndex(table: string, index: string, alterStatement: string): Promise<boolean> {
+  const [row] = await query<{ n: number | string }>(
+    `SELECT COUNT(*) AS n
+       FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+    [table, index],
+  );
+  if (Number(row?.n ?? 0) > 0) return false;
+  await query(alterStatement);
+  console.log(`added index ${table}.${index}`);
+  return true;
+}
+
+// 唯一索引建不上去就会一直失败，所以先把历史重复行清掉：同项目同标题只保留 id 最小的一条。
+// 删除前把整行打到日志，方便事后追溯（这类重复多半是旧版 404 bug 带来的重试）。
+async function dedupeDemands(): Promise<void> {
+  const groups = await query<{ project_id: number; title: string }>(
+    `SELECT project_id, title
+       FROM demands
+      GROUP BY project_id, title
+     HAVING COUNT(*) > 1`,
+  );
+  for (const group of groups) {
+    const rows = await query<{
+      id: number;
+      status: string;
+      created_by: string | null;
+      created_at: Date | string;
+    }>('SELECT id, status, created_by, created_at FROM demands WHERE project_id = ? AND title = ? ORDER BY id', [
+      group.project_id,
+      group.title,
+    ]);
+    const [keep, ...dropped] = rows;
+    if (!keep) continue;
+    console.log(`dedupe demands: project ${group.project_id} title ${JSON.stringify(group.title)} 保留 id=${keep.id}`);
+    for (const row of dropped) {
+      console.log(
+        `  drop id=${row.id} status=${row.status} created_by=${row.created_by} created_at=${String(row.created_at)}`,
+      );
+      await execute('DELETE FROM demands WHERE id = ?', [row.id]);
+    }
+  }
+}
+
 async function migrate(): Promise<void> {
   const sql = fs.readFileSync(path.join(here, 'schema.sql'), 'utf8');
   const statements = sql
@@ -53,6 +98,13 @@ async function migrate(): Promise<void> {
     "ALTER TABLE sessions ADD COLUMN auth_method VARCHAR(16) NOT NULL DEFAULT 'sso' AFTER user_id",
   );
   await ensureColumn('sessions', 'developer', 'ALTER TABLE sessions ADD COLUMN developer TINYINT(1) NULL AFTER auth_method');
+  // 去重必须排在唯一索引之前，否则 ALTER 会因重复键失败。
+  await dedupeDemands();
+  await ensureIndex(
+    'demands',
+    'uk_demands_project_title',
+    'ALTER TABLE demands ADD UNIQUE KEY uk_demands_project_title (project_id, title)',
+  );
   console.log(`schema ok (${statements.length} statements)`);
 }
 

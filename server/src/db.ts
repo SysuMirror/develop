@@ -34,6 +34,11 @@ export async function execute(sql: string, params: unknown[] = []): Promise<Resu
   return result as ResultSetHeader;
 }
 
+/** 唯一键撞车（ER_DUP_ENTRY）。mysql2 抛的错带 code，不依赖 errno 数值。 */
+export function isDuplicateEntry(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ER_DUP_ENTRY';
+}
+
 export async function withTx<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
   const conn = await pool.getConnection();
   try {

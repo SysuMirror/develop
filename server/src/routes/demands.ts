@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { loadProject, requireMember } from '../access.ts';
-import { execute, one, query } from '../db.ts';
+import { execute, isDuplicateEntry, one, query } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
 import type { DemandJoinedRow, DemandRow, DirectoryUser } from '../types.ts';
@@ -80,10 +80,22 @@ router.post(
     const title = String(req.body?.title ?? '').trim();
     const detail = req.body?.detail == null ? null : String(req.body.detail).trim();
     if (!title || title.length > 200) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 200 字');
-    const inserted = await execute(
-      "INSERT INTO demands (project_id, title, detail, created_by, status) VALUES (?, ?, ?, ?, 'waiting')",
-      [project.id, title, detail, user.id],
-    );
+    const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ?', [
+      project.id,
+      title,
+    ]);
+    if (duplicate) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
+    let inserted: { insertId: number };
+    try {
+      inserted = await execute(
+        "INSERT INTO demands (project_id, title, detail, created_by, status) VALUES (?, ?, ?, ?, 'waiting')",
+        [project.id, title, detail, user.id],
+      );
+    } catch (error) {
+      // 并发发布同名：唯一键兜底，翻译成同一个 409，不冒 500。
+      if (isDuplicateEntry(error)) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
+      throw error;
+    }
     const created = await loadJoinedDemand(inserted.insertId);
     res.status(201).json((await mapDemands([created]))[0]);
   }),

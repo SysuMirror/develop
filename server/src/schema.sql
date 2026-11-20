@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS demands (
   accepted_at DATETIME NULL,
   completed_at DATETIME NULL,
   PRIMARY KEY (id),
+  UNIQUE KEY uk_demands_project_title (project_id, title),
   KEY idx_demands_project (project_id),
   KEY idx_demands_user (user_id),
   KEY idx_demands_status (status)

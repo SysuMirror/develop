@@ -114,7 +114,7 @@ external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden
 
 ** leader 的动作
 
-创建项目 =POST /api/projects= ： =title= 必填且不超过 128 字， =misc= 可选；同一事务里写入
+创建项目 =POST /api/projects= ： =title= 必填且不超过 200 字， =misc= 可选；同一事务里写入
 projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建者即刻成为 leader。
 
 - =PATCH /api/projects/:id= ：只有 leader 可改 =title= / =misc= ；没有可更新字段时 400。
@@ -136,7 +136,7 @@ projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建�
 
 | 状态 | code                   | 触发条件                               |
 |------+------------------------+----------------------------------------|
-|  400 | =BAD_TITLE=            | 标题为空或超过 128 字                  |
+|  400 | =BAD_TITLE=            | 标题为空或超过 200 字                  |
 |  400 | =NOTHING_TO_UPDATE=    | PATCH 没有任何可更新字段               |
 |  403 | =NOT_LEADER=           | 非 leader 改项目、转让、释放、移除成员 |
 |  403 | =CANNOT_FIRE_LEADER=   | 移除目标就是 leader                    |
@@ -196,19 +196,22 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 - =GET /api/demands= ： =status= 取 =waiting= / =accepted= / =completed= ， =q= 匹配标题；
   排序是 waiting → accepted → completed，同状态按发布时间倒序。
 - =POST /api/projects/:id/demands= ：项目成员才能发布， =title= 必填且不超过 200 字， =detail= 可选。
+  同一项目内标题唯一（大小写不敏感），重名返回 409 =DUPLICATE_TITLE= ；不同项目可以各自发布
+  同名需求，已完成的需求也同样占着这个名字。
 - =POST /api/demands/:id/accept= ：只能接 waiting 的需求，不能接自己发布的；写入 =user_id= 与
   =accepted_at= 。更新条件带 =AND status='waiting'= ，并发接单只有一方成功。
 - =POST /api/demands/:id/complete= ：只有 accepted 的需求可标记完成，允许发布者、接单人、
   项目 leader 操作；写入 =completed_at= 。
 
-| 状态 | code          | 触发条件                                    |
-|------+---------------+---------------------------------------------|
-|  400 | =BAD_TITLE=   | 标题为空或超过 200 字                       |
-|  403 | =NOT_MEMBER=  | 非项目成员发布需求                          |
-|  403 | =SELF_ACCEPT= | 接自己发布的需求                            |
-|  403 | =NOT_ALLOWED= | 非发布者、非接单人、非项目 leader 标记完成  |
-|  404 | =NOT_FOUND=   | 需求不存在                                  |
-|  409 | =NOT_PENDING= | 接已接单 / 已完成的需求，或完成未接单的需求 |
+| 状态 | code              | 触发条件                                    |
+|------+-------------------+---------------------------------------------|
+|  400 | =BAD_TITLE=       | 标题为空或超过 200 字                       |
+|  403 | =NOT_MEMBER=      | 非项目成员发布需求                          |
+|  403 | =SELF_ACCEPT=     | 接自己发布的需求                            |
+|  403 | =NOT_ALLOWED=     | 非发布者、非接单人、非项目 leader 标记完成  |
+|  404 | =NOT_FOUND=       | 需求不存在                                  |
+|  409 | =NOT_PENDING=     | 接已接单 / 已完成的需求，或完成未接单的需求 |
+|  409 | =DUPLICATE_TITLE= | 同项目内已有同名需求                        |
 
 * 六、角色与权限
 
@@ -514,7 +517,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | POST   | =/api/applies/:id/reject=           | leader | 拒绝申请                               |
 | DELETE | =/api/applies/:id=                  | 本人   | 撤回 waiting 申请                      |
 | GET    | =/api/demands=                      | 开发者 | 需求列表， =status= / =q= / 分页        |
-| POST   | =/api/projects/:id/demands=         | 成员   | 发布需求                               |
+| POST   | =/api/projects/:id/demands=         | 成员   | 发布需求，同项目内标题唯一             |
 | POST   | =/api/demands/:id/accept=           | 开发者 | 接单，不能接自己发的                   |
 | POST   | =/api/demands/:id/complete=         | 相关人 | 发布者 / 接单人 / 项目 leader 标记完成 |
 
