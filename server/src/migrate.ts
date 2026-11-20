@@ -68,6 +68,45 @@ async function dedupeDemands(): Promise<void> {
   }
 }
 
+// 每个项目必须恰好一个 leader：先把历史 leader 缺位行修好，再把列收紧为 NOT NULL。
+// 有成员的项目把最早加入者升为 leader；没有任何成员的项目无法满足约束，级联删除并打日志。
+async function enforceLeaderRequired(): Promise<void> {
+  const orphans = await query<{ id: number; title: string }>(
+    'SELECT id, title FROM projects WHERE leader_id IS NULL ORDER BY id',
+  );
+  for (const project of orphans) {
+    const [member] = await query<{ user_id: string }>(
+      'SELECT user_id FROM project_member WHERE project_id = ? ORDER BY created_at, id LIMIT 1',
+      [project.id],
+    );
+    if (member) {
+      await query("UPDATE project_member SET role = 'leader' WHERE project_id = ? AND user_id = ?", [
+        project.id,
+        member.user_id,
+      ]);
+      await query('UPDATE projects SET leader_id = ? WHERE id = ?', [member.user_id, project.id]);
+      console.log(`promote leader: project ${project.id} ${JSON.stringify(project.title)} -> ${member.user_id}`);
+      continue;
+    }
+    console.log(`drop leaderless project: id=${project.id} title=${JSON.stringify(project.title)}`);
+    await query('DELETE FROM applies WHERE project_id = ?', [project.id]);
+    await query('DELETE FROM demands WHERE project_id = ?', [project.id]);
+    await query('DELETE FROM project_member WHERE project_id = ?', [project.id]);
+    await query('DELETE FROM projects WHERE id = ?', [project.id]);
+  }
+  // leader 型申请已不再受理，残留的 waiting 行没人能审批，直接置为 rejected。
+  await query("UPDATE applies SET status = 'rejected', decided_at = NOW() WHERE status = 'waiting' AND type = 'leader'");
+  const [column] = await query<{ nullable: string }>(
+    `SELECT IS_NULLABLE AS nullable
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'projects' AND COLUMN_NAME = 'leader_id'`,
+  );
+  if (column?.nullable === 'YES') {
+    await query('ALTER TABLE projects MODIFY COLUMN leader_id VARCHAR(36) NOT NULL');
+    console.log('projects.leader_id -> NOT NULL');
+  }
+}
+
 async function migrate(): Promise<void> {
   const sql = fs.readFileSync(path.join(here, 'schema.sql'), 'utf8');
   const statements = sql
@@ -100,6 +139,8 @@ async function migrate(): Promise<void> {
   await ensureColumn('sessions', 'developer', 'ALTER TABLE sessions ADD COLUMN developer TINYINT(1) NULL AFTER auth_method');
   // 去重必须排在唯一索引之前，否则 ALTER 会因重复键失败。
   await dedupeDemands();
+  // 收紧 leader 约束要排在列表查询/索引之前，旧库的 NULL 行必须先清掉。
+  await enforceLeaderRequired();
   await ensureIndex(
     'demands',
     'uk_demands_project_title',

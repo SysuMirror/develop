@@ -232,22 +232,6 @@ router.post(
   }),
 );
 
-router.post(
-  '/projects/:id/release',
-  wrap(async (req, res) => {
-    const project = await loadProject(req.params.id);
-    const user = req.user;
-    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    await requireLeader(project, user);
-    await withTx(async (conn) => {
-      await conn.query('DELETE FROM project_member WHERE project_id = ? AND user_id = ?', [project.id, user.id]);
-      await conn.query('UPDATE projects SET leader_id = NULL WHERE id = ?', [project.id]);
-    });
-    await syncAfterRemoval(user.id);
-    res.json({ ok: true });
-  }),
-);
-
 router.delete(
   '/projects/:id/members/me',
   wrap(async (req, res) => {
@@ -255,7 +239,7 @@ router.delete(
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     if (project.leader_id === user.id) {
-      throw conflict('LEADER_MUST_TRANSFER', 'leader 需要先转让或释放项目，再退出');
+      throw conflict('LEADER_MUST_TRANSFER', 'leader 需要先转让或删除项目，再退出');
     }
     const membership = await loadMembership(project.id, user.id);
     if (!membership) throw notFound('你不是该项目成员');

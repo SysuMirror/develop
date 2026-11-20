@@ -1,6 +1,6 @@
 import { one } from './db.ts';
 import { forbidden, notFound } from './http.ts';
-import type { ApplyType, MembershipRow, ProjectRow, Role, SessionUser } from './types.ts';
+import type { MembershipRow, ProjectRow, Role, SessionUser } from './types.ts';
 
 export async function loadProject(projectId: unknown): Promise<ProjectRow> {
   const id = Number(projectId);
@@ -18,14 +18,12 @@ export async function requireLeader(project: Pick<ProjectRow, 'leader_id'>, user
   if (project.leader_id !== user.id) throw forbidden('NOT_LEADER', '只有项目 leader 可以执行该操作');
 }
 
-// leader 缺位的项目没有可授权的人，按先到先得处理：任何登录开发者都能处理 leader 型申请。
+// 项目恰好一个 leader，审批权也只属于他。
 export async function requireApplyDecider(
   project: Pick<ProjectRow, 'leader_id'>,
   user: SessionUser,
-  applyType: ApplyType,
 ): Promise<void> {
   if (project.leader_id === user.id) return;
-  if (applyType === 'leader' && project.leader_id === null) return;
   throw forbidden('NOT_LEADER', '只有项目 leader 可以审批该申请');
 }
 

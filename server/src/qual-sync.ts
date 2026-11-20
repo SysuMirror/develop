@@ -54,7 +54,7 @@ export async function enqueueQualification(userId: string | null | undefined, ta
   void runQualSyncOnce().catch((error: unknown) => console.error('[qual-sync]', errorMeta(error).message));
 }
 
-// 被开除 / 退出 / 释放项目后调用：只有确实不再属于任何项目才撤销资格。
+// 被 leader 移除 / 退出 / 项目被删除后调用：只有确实不再属于任何项目才撤销资格。
 export async function revokeIfNoMembership(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
   const [row] = await query<{ n: number | string }>('SELECT COUNT(*) AS n FROM project_member WHERE user_id = ?', [userId]);

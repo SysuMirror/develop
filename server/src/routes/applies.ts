@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import type { RowDataPacket } from 'mysql2/promise';
 import { loadMembership, loadProject, requireApplyDecider } from '../access.ts';
 import { execute, one, query, withTx } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
-import { ApiError, badRequest, conflict, forbidden, notFound, wrap } from '../http.ts';
+import { badRequest, conflict, forbidden, notFound, wrap } from '../http.ts';
 import { enqueueQualification } from '../qual-sync.ts';
 import type { ApplyJoinedRow, ApplyRow, DirectoryUser } from '../types.ts';
 
@@ -43,13 +43,13 @@ router.post(
     const project = await loadProject(req.params.id);
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    const type = String(req.body?.type || 'participant');
+    const type = String(req.body?.type ?? 'participant');
     const note = req.body?.note == null ? null : String(req.body.note).trim();
-    if (!['leader', 'participant'].includes(type)) throw badRequest('BAD_TYPE', 'type 只能是 leader 或 participant');
+    // 项目始终有 leader，leader 型申请不再有意义，只接受成员申请。
+    if (type !== 'participant') throw badRequest('BAD_TYPE', 'type 只能是 participant');
     if (project.leader_id === user.id) throw conflict('ALREADY_MEMBER', '你已经是该项目 leader');
     const membership = await loadMembership(project.id, user.id);
     if (membership) throw conflict('ALREADY_MEMBER', '你已经是该项目成员');
-    if (type === 'leader' && project.leader_id !== null) throw conflict('LEADER_EXISTS', '该项目已有 leader');
 
     const existing = await one<ApplyRow>('SELECT * FROM applies WHERE project_id = ? AND user_id = ? AND type = ?', [
       project.id,
@@ -91,7 +91,7 @@ router.get(
     const rows = await query<ApplyJoinedRow>(
       `${APPLY_SELECT}
         WHERE a.status = 'waiting'
-          AND (p.leader_id = ? OR (p.leader_id IS NULL AND a.type = 'leader'))
+          AND p.leader_id = ?
         ORDER BY a.created_at`,
       [req.user?.id],
     );
@@ -107,34 +107,24 @@ router.post(
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '该申请已被处理');
     const decider = req.user;
     if (!decider) throw forbidden('NOT_LEADER', '请先登录');
-    await requireApplyDecider(apply, decider, apply.type);
+    await requireApplyDecider(apply, decider);
 
     await withTx(async (conn) => {
       const [memberships] = await conn.query<RowDataPacket[]>(
         'SELECT role FROM project_member WHERE project_id = ? AND user_id = ? FOR UPDATE',
         [apply.project_id, apply.user_id],
       );
+      // 项目始终有 leader，审批通过的申请只能是成员。
       if (memberships.length > 0) {
-        await conn.query('UPDATE project_member SET role = ? WHERE project_id = ? AND user_id = ?', [
-          apply.type === 'leader' ? 'leader' : 'participant',
+        await conn.query("UPDATE project_member SET role = 'participant' WHERE project_id = ? AND user_id = ?", [
           apply.project_id,
           apply.user_id,
         ]);
       } else {
-        await conn.query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
+        await conn.query("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'participant')", [
           apply.project_id,
           apply.user_id,
-          apply.type === 'leader' ? 'leader' : 'participant',
         ]);
-      }
-      if (apply.type === 'leader') {
-        const [updated] = await conn.query<ResultSetHeader>(
-          'UPDATE projects SET leader_id = ? WHERE id = ? AND leader_id IS NULL',
-          [apply.user_id, apply.project_id],
-        );
-        if (updated.affectedRows === 0) {
-          throw new ApiError(409, 'LEADER_EXISTS', '该项目已有 leader');
-        }
       }
       await conn.query("UPDATE applies SET status = 'accepted', decided_at = NOW(), decided_by = ? WHERE id = ?", [
         decider.id,
@@ -164,7 +154,7 @@ router.post(
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '该申请已被处理');
     const decider = req.user;
     if (!decider) throw forbidden('NOT_LEADER', '请先登录');
-    await requireApplyDecider(apply, decider, apply.type);
+    await requireApplyDecider(apply, decider);
     await query("UPDATE applies SET status = 'rejected', decided_at = NOW(), decided_by = ? WHERE id = ?", [
       decider.id,
       apply.id,
