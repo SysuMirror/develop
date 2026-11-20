@@ -505,7 +505,7 @@ function DemandDialog({ open, onClose, onSubmit, busy }: DemandDialogProps) {
         <input
           className="input"
           value={form.title}
-          maxLength={200}
+          maxLength={128}
           placeholder="例如：需求列表增加按状态筛选"
           onChange={(event) => setForm({ ...form, title: event.target.value })}
         />
