@@ -88,7 +88,7 @@ export default function ProjectsPage() {
                     {project.misc || '暂无说明'}
                   </div>
                 </td>
-                <td>{project.leader ? project.leader.name : <span className="faint">招募中</span>}</td>
+                <td>{project.leader ? project.leader.name : <span className="faint">—</span>}</td>
                 <td className="right">{project.memberCount}</td>
                 <td className="right">
                   {project.waitingDemandCount > 0 ? (

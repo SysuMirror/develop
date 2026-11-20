@@ -47,7 +47,7 @@ export default function HomePage() {
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span className="row" style={{ gap: 6 }}>
                 {project.leader ? <Avatar name={displayName(project.leader)} src={project.leader.avatar} /> : null}
-                <span className="muted">{project.leader ? displayName(project.leader) : '招募 leader 中'}</span>
+                <span className="muted">{project.leader ? displayName(project.leader) : '—'}</span>
               </span>
               <span className="faint">
                 {project.memberCount} 人 · {project.waitingDemandCount} 个待接需求

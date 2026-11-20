@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { api, messageOf } from '../api';
 import { useAuth } from '../auth';
@@ -19,14 +19,9 @@ import {
   displayName,
   useToast,
 } from '../ui';
-import type { ApplyItem, ApplyType, ProjectDemand, ProjectDetail } from '../types';
+import type { ApplyItem, ProjectDemand, ProjectDetail } from '../types';
 
-type DialogKind = 'apply' | 'edit' | 'demand' | 'quit' | 'release';
-
-interface ApplyForm {
-  type: ApplyType;
-  note: string | null;
-}
+type DialogKind = 'apply' | 'edit' | 'demand' | 'quit' | 'delete';
 
 interface EditForm {
   title: string;
@@ -40,6 +35,7 @@ interface DemandForm {
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { push } = useToast();
   const project = useApi<ProjectDetail>(`/projects/${id}`);
@@ -50,14 +46,18 @@ export default function ProjectDetailPage() {
   const data = project.data;
   const applyItems = (inbox.data?.items ?? []).filter((item) => String(item.project.id) === String(id));
 
-  const run = async (fn: () => Promise<unknown>, okMessage?: string) => {
+  const run = async (fn: () => Promise<unknown>, okMessage?: string, after?: () => void) => {
     setBusy(true);
     try {
       await fn();
       if (okMessage) push(okMessage, 'success');
       setDialog(null);
-      project.reload();
-      inbox.reload();
+      // 项目被删除后详情已不存在，只跳走，不再 reload。
+      if (after) after();
+      else {
+        project.reload();
+        inbox.reload();
+      }
     } catch (error) {
       push(messageOf(error), 'error');
     } finally {
@@ -85,7 +85,7 @@ export default function ProjectDetailPage() {
   const leader = data.leader;
   const isLeader = permissions.isLeader;
   const isMember = permissions.isMember;
-  const canAcceptApply = isLeader || leader === null;
+  const canAcceptApply = isLeader;
   const myId = user?.id;
 
   function renderDemandAction(demand: ProjectDemand): ReactNode {
@@ -138,7 +138,7 @@ export default function ProjectDetailPage() {
         <div className="row">
           {permissions.canApply ? (
             <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: 'apply' })}>
-              {leader ? '申请加入' : '申请成为 Leader'}
+              申请加入
             </button>
           ) : null}
           {isMember ? (
@@ -151,8 +151,8 @@ export default function ProjectDetailPage() {
               <button type="button" className="btn btn-secondary" onClick={() => setDialog({ kind: 'edit' })}>
                 编辑
               </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setDialog({ kind: 'release' })}>
-                释放项目
+              <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'delete' })}>
+                删除项目
               </button>
             </>
           ) : null}
@@ -174,7 +174,7 @@ export default function ProjectDetailPage() {
                 {displayName(leader)}
               </Link>
             ) : (
-              <span className="faint">空缺 · 可在下方申请成为 Leader</span>
+              <span className="faint">—</span>
             )}
           </dd>
           <dt>创建时间</dt>
@@ -321,7 +321,6 @@ export default function ProjectDetailPage() {
       <ApplyDialog
         open={dialog?.kind === 'apply'}
         onClose={() => setDialog(null)}
-        leaderMissing={leader === null}
         busy={busy}
         onSubmit={(form) => run(() => api.post(`/projects/${id}/applies`, form), '申请已提交')}
       />
@@ -363,26 +362,12 @@ export default function ProjectDetailPage() {
         }
       />
 
-      <Modal
-        open={dialog?.kind === 'release'}
-        title="释放项目"
-        sub="释放后你将不再是成员，项目进入招募 Leader 状态，任何用户都可以申请接管。"
+      <DeleteProjectDialog
+        open={dialog?.kind === 'delete'}
+        title={data.title}
+        busy={busy}
         onClose={() => setDialog(null)}
-        footer={
-          <>
-            <button type="button" className="btn btn-secondary" onClick={() => setDialog(null)}>
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger"
-              disabled={busy}
-              onClick={() => run(() => api.post(`/projects/${id}/release`), '已释放项目')}
-            >
-              确认释放
-            </button>
-          </>
-        }
+        onConfirm={() => run(() => api.del(`/projects/${id}`), '已删除项目', () => navigate('/projects'))}
       />
     </div>
   );
@@ -391,13 +376,11 @@ export default function ProjectDetailPage() {
 interface ApplyDialogProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (form: ApplyForm) => void;
+  onSubmit: (form: { note: string | null }) => void;
   busy: boolean;
-  leaderMissing: boolean;
 }
 
-function ApplyDialog({ open, onClose, onSubmit, busy, leaderMissing }: ApplyDialogProps) {
-  const [type, setType] = useState<ApplyType>(leaderMissing ? 'leader' : 'participant');
+function ApplyDialog({ open, onClose, onSubmit, busy }: ApplyDialogProps) {
   const [note, setNote] = useState('');
   return (
     <Modal
@@ -414,21 +397,50 @@ function ApplyDialog({ open, onClose, onSubmit, busy, leaderMissing }: ApplyDial
             type="button"
             className="btn btn-primary"
             disabled={busy}
-            onClick={() => onSubmit({ type, note: note.trim() || null })}
+            onClick={() => onSubmit({ note: note.trim() || null })}
           >
             提交申请
           </button>
         </>
       }
     >
-      <Field label="申请类型">
-        <select className="select" value={type} onChange={(event) => setType(event.target.value as ApplyType)}>
-          <option value="participant">成员</option>
-          {leaderMissing ? <option value="leader">Leader（项目当前空缺）</option> : null}
-        </select>
-      </Field>
       <Field label="留言" hint="写点你能承担的部分，审批会更快。">
         <textarea className="textarea" value={note} onChange={(event) => setNote(event.target.value)} />
+      </Field>
+    </Modal>
+  );
+}
+
+interface DeleteProjectDialogProps {
+  open: boolean;
+  title: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+function DeleteProjectDialog({ open, title, busy, onClose, onConfirm }: DeleteProjectDialogProps) {
+  const [typed, setTyped] = useState('');
+  const matched = typed.trim() === title;
+  return (
+    <Modal
+      open={open}
+      title="删除项目"
+      sub="项目、成员、申请与需求都会被永久删除，无法恢复。"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="button" className="btn btn-danger" disabled={busy || !matched} onClick={onConfirm}>
+            确认删除
+          </button>
+        </>
+      }
+    >
+      <Field label="项目名称" hint={`输入「${title}」以确认删除。`}>
+        <input className="input" value={typed} onChange={(event) => setTyped(event.target.value)} />
       </Field>
     </Modal>
   );
