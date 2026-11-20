@@ -7,6 +7,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import DemandsPage from './pages/DemandsPage';
 import DemandDetailPage from './pages/DemandDetailPage';
+import DemandEditPage from './pages/DemandEditPage';
 import ProfilePage from './pages/ProfilePage';
 import LoginPage from './pages/LoginPage';
 import NoQualificationPage from './pages/NoQualificationPage';
@@ -136,6 +137,14 @@ export default function App() {
           element={
             <RequireAuth>
               <DemandsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="demands/:id/edit"
+          element={
+            <RequireAuth>
+              <DemandEditPage />
             </RequireAuth>
           }
         />
