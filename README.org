@@ -25,6 +25,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 | 开发者列表 | =/users=        | 目录搜索（姓名 / 用户名），附参与项目数与 leader 次数                   |
 | 开发者详情 | =/users/:id=    | 资料、参与项目、申请记录、承接需求                                      |
 | 需求       | =/demands=      | 按状态（待接单 / 进行中 / 已完成）与标题筛选；接单、标记完成            |
+| 需求详情   | =/demands/:id=  | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、标记完成        |
 | 我的       | =/me=           | 待我审批、我发出的申请、我参与的项目                                    |
 
 * 二、身份与资格
@@ -195,9 +196,11 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 
 - =GET /api/demands= ： =status= 取 =waiting= / =accepted= / =completed= ， =q= 匹配标题；
   排序是 waiting → accepted → completed，同状态按发布时间倒序。
+- =GET /api/demands/:id= ： 单条需求，字段与列表项一致；不存在的 id 返回 404 =NOT_FOUND= 。
 - =POST /api/projects/:id/demands= ：项目成员才能发布， =title= 必填且不超过 128 字， =detail= 可选。
   同一项目内标题唯一（大小写不敏感），重名返回 409 =DUPLICATE_TITLE= ；不同项目可以各自发布
-  同名需求，已完成的需求也同样占着这个名字。
+  同名需求，已完成的需求也同样占着这个名字。 =detail= 按 Markdown 原样存储，前端在需求详情页渲染
+  （不引 =rehype-raw= ，正文里的裸 HTML 不执行）。
 - =POST /api/demands/:id/accept= ：只能接 waiting 的需求，不能接自己发布的；写入 =user_id= 与
   =accepted_at= 。更新条件带 =AND status='waiting'= ，并发接单只有一方成功。
 - =POST /api/demands/:id/complete= ：只有 accepted 的需求可标记完成，允许发布者、接单人、
@@ -517,6 +520,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | POST   | =/api/applies/:id/reject=           | leader | 拒绝申请                               |
 | DELETE | =/api/applies/:id=                  | 本人   | 撤回 waiting 申请                      |
 | GET    | =/api/demands=                      | 开发者 | 需求列表， =status= / =q= / 分页        |
+| GET    | =/api/demands/:id=                  | 开发者 | 单条需求，404 为 =NOT_FOUND=            |
 | POST   | =/api/projects/:id/demands=         | 成员   | 发布需求，同项目内标题唯一             |
 | POST   | =/api/demands/:id/accept=           | 开发者 | 接单，不能接自己发的                   |
 | POST   | =/api/demands/:id/complete=         | 相关人 | 发布者 / 接单人 / 项目 leader 标记完成 |
@@ -590,10 +594,11 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       debug.ts        # 接口自检页开关（读 /api/health 的 debug 字段）
       types.ts        # 接口返回值的类型定义
       ui.tsx          # 表格 / 徽章 / 空态等基础组件
+      markdown.tsx    # 需求正文的 Markdown 渲染（react-markdown + remark-gfm）
       styles.css      # 全部样式
       pages/          # Home / Login / Projects / ProjectDetail / Users /
-                      # UserDetail / Demands / Profile / NoQualification /
-                      # DebugApi（接口自检）
+                      # UserDetail / Demands / DemandDetail / Profile /
+                      # NoQualification / DebugApi（接口自检）
     vite.config.ts    # 5173 端口与 /api 代理
   static/er-clean.png # ER 图导出
 #+end_src
