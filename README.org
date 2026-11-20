@@ -467,35 +467,10 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
      created_at / accepted_at / submitted_at / completed_at\l
      UNIQUE (project_id, title)" ];
 
-    sessions
-    [ label="sessions |
-     id : [PK] CHAR(43)\l
-     user_id : [FK] users.id\l
-     auth_method : sso / dev\l
-     developer : 最近一次资格\l
-     access_token\l
-     refresh_token\l
-     access_token_expires_at\l
-     created_at\l
-     expires_at" ];
-
-    developer_qual_sync
-    [ label="developer_qual_sync |
-     id : [PK]\l
-     user_id : [FK] users.id，UNIQUE\l
-     target_value : is_developer 目标值\l
-     status : pending / done / failed\l
-     attempts\l
-     last_error\l
-     next_attempt_at\l
-     created_at / updated_at" ];
-
     users -> projects [style=dashed, label="leader_id / created_by"];
     users -> project_member [style=dashed];
     users -> applies [style=dashed, label="user_id / decided_by"];
     users -> demands [style=dashed, label="user_id / created_by"];
-    users -> sessions [style=dashed];
-    users -> developer_qual_sync [style=dashed];
 
     projects -> project_member [arrowtail=teetee, arrowhead=crowtee];
     projects -> applies [arrowtail=teetee, arrowhead=crowodot];
@@ -507,7 +482,8 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 [[file:./static/er-clean.png]]
 
 =user_profile= 不在图里，字段只有 =user_id= / =name= / =avatar= / =email= / =updated_at= ，
-纯粹是展示缓存。
+纯粹是展示缓存。=sessions= （登录会话）与 =developer_qual_sync= （回写 UniSSO 资格的待同步队列）
+也不画：它们只服务登录与资格同步，不参与业务关系，字段见 =server/src/schema.sql= 。
 
 权限不落库： =permissions.canManage= / =canEdit= / =canAccept= 这类开关由服务端按 =project_member.role= 、
 需求的发布者与状态即时算出，前端只读这些布尔值决定按钮和页面能不能进（独立编辑页就是这样拦的）。
