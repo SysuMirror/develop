@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import * as auth from './auth.ts';
 import { parseCookies, wrap } from './http.ts';
 import { pool } from './db.ts';
+import { warm as warmDirectory } from './directory.ts';
 import { startQualSyncWorker } from './qual-sync.ts';
 import appliesRouter from './routes/applies.ts';
 import demandsRouter from './routes/demands.ts';
@@ -118,5 +119,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   createApp().listen(port, '0.0.0.0', () => {
     console.log(`api listening on 0.0.0.0:${port}`);
   });
+  // 目录预热在后台跑，失败也不会影响启动；请求路径永远不等待它。
+  warmDirectory();
   startQualSyncWorker();
 }

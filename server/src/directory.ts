@@ -39,6 +39,14 @@ interface RawUser {
 let cached: DirectoryCache | null = null;
 let inflight: Promise<Map<string, DirectoryUser>> | null = null;
 let loggedFailure = false;
+// 失败也要记时间：否则目录不可用时每个请求都会重新打一次外部 SSO（实测每次 350ms+）。
+let failedAt = 0;
+
+function retryMs(): number {
+  const seconds = Number(process.env.SSO_DIRECTORY_RETRY_SECONDS ?? 30);
+  if (!Number.isFinite(seconds) || seconds < 0) return 30_000;
+  return seconds * 1000;
+}
 
 function ttlMs(): number {
   const seconds = Number(process.env.SSO_DIRECTORY_TTL_SECONDS ?? 60);
@@ -134,11 +142,18 @@ async function load(): Promise<Map<string, DirectoryUser>> {
   }
   if (cached && Date.now() - cached.fetchedAt < ttlMs()) return cached.users;
   if (inflight) return inflight;
+  // 失败窗口内直接抛，不再打外部请求；这段窗口里调用方走缓存 / user_profile 降级。
+  if (failedAt && Date.now() - failedAt < retryMs()) throw new Error('用户目录暂不可用，稍后重试');
   inflight = fetchDirectory()
     .then((users) => {
       cached = { users, fetchedAt: Date.now() };
       loggedFailure = false;
+      failedAt = 0;
       return users;
+    })
+    .catch((error: unknown) => {
+      failedAt = Date.now();
+      throw error;
     })
     .finally(() => {
       inflight = null;
@@ -159,18 +174,24 @@ export interface Snapshot {
   stale: boolean;
 }
 
-// 取目录快照，永不抛错：失败时 stale=true，名字交给调用方降级。
-export async function snapshot(): Promise<Snapshot> {
-  try {
-    return { users: withDemo(await load()), stale: false };
-  } catch (error) {
+// 后台刷新目录：请求路径不等待外部 SSO，重试节奏由 load() 的失败窗口控制。
+export function warm(): void {
+  load().catch((error: unknown) => {
     // 连续失败只在第一次打日志，否则每个请求都会刷一行。
     if (!loggedFailure) {
       loggedFailure = true;
       console.error('[directory] 用户目录拉取失败，展示降级为「未知用户」：', messageOfError(error));
     }
-    return { users: withDemo(cached?.users ?? new Map()), stale: true };
-  }
+  });
+}
+
+// 取目录快照，永不抛错、也不阻塞在外部请求上：用已有缓存，同时后台刷新。
+// stale=true 表示缓存过期或尚未取到，调用方按「目录不可用」降级。
+export async function snapshot(): Promise<Snapshot> {
+  warm();
+  const current = cached;
+  if (!current) return { users: withDemo(new Map()), stale: true };
+  return { users: withDemo(current.users), stale: Date.now() - current.fetchedAt >= ttlMs() };
 }
 
 function messageOfError(error: unknown): string {
@@ -204,11 +225,12 @@ export async function getUser(id: unknown): Promise<DirectoryUser | null> {
 }
 
 // 目录优先，user_profile 补缺；两者都没有就是查无此人。
-export async function getUsers(ids: unknown[]): Promise<Map<string, DirectoryUser>> {
+// 只读本地（内存缓存 + 一次 user_profile 查询），绝不为「补名字」而阻塞外部 SSO。
+export async function getUsersLocal(ids: unknown[]): Promise<Map<string, DirectoryUser>> {
   const wanted = [...new Set((ids || []).filter(Boolean).map(String))];
   const found = new Map<string, DirectoryUser>();
   if (wanted.length === 0) return found;
-  const { users: directory } = await snapshot();
+  const directory = withDemo(cached?.users ?? new Map());
   const missing: string[] = [];
   for (const id of wanted) {
     const user = directory.get(id);
@@ -220,6 +242,11 @@ export async function getUsers(ids: unknown[]): Promise<Map<string, DirectoryUse
     for (const [id, user] of profiles) found.set(id, user);
   }
   return found;
+}
+
+export async function getUsers(ids: unknown[]): Promise<Map<string, DirectoryUser>> {
+  warm();
+  return getUsersLocal(ids);
 }
 
 export interface LookupResult {
