@@ -20,6 +20,12 @@ import {
 } from '../ui';
 import type { ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
 
+function demandTime(demand: DemandItem): string | null {
+  if (demand.status === 'completed') return demand.completedAt;
+  if (demand.status === 'review') return demand.submittedAt;
+  return demand.acceptedAt;
+}
+
 function DemandRow({
   demand,
   action,
@@ -36,15 +42,7 @@ function DemandRow({
         <div className="faint truncate">
           <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
           {' · '}
-          <TimeAgo
-            value={
-              demand.status === 'completed'
-                ? demand.completedAt
-                : demand.status === 'review'
-                  ? demand.submittedAt
-                  : demand.acceptedAt
-            }
-          />
+          <TimeAgo value={demandTime(demand)} />
         </div>
       </div>
       <div className="row" style={{ gap: 8 }}>
