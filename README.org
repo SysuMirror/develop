@@ -445,7 +445,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
      id : [PK]\l
      project_id : [FK] projects.id\l
      user_id : [FK] users.id\l
-     type : leader / participant\l
+     type : leader / participant（接口目前只收 participant）\l
      status : waiting / accepted / rejected\l
      note\l
      resume_url\l
@@ -463,8 +463,9 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
      title\l
      detail\l
      status : waiting / accepted / review / completed / suspended\l
-     status_before_suspend : 挂起来源｜可空\l
-     created_at / accepted_at / submitted_at / completed_at" ];
+     status_before_suspend : 挂起来源，可空\l
+     created_at / accepted_at / submitted_at / completed_at\l
+     UNIQUE (project_id, title)" ];
 
     sessions
     [ label="sessions |
@@ -475,6 +476,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
      access_token\l
      refresh_token\l
      access_token_expires_at\l
+     created_at\l
      expires_at" ];
 
     developer_qual_sync
@@ -484,7 +486,9 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
      target_value : is_developer 目标值\l
      status : pending / done / failed\l
      attempts\l
-     next_attempt_at" ];
+     last_error\l
+     next_attempt_at\l
+     created_at / updated_at" ];
 
     users -> projects [style=dashed, label="leader_id / created_by"];
     users -> project_member [style=dashed];
@@ -504,6 +508,10 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 
 =user_profile= 不在图里，字段只有 =user_id= / =name= / =avatar= / =email= / =updated_at= ，
 纯粹是展示缓存。
+
+权限不落库： =permissions.canManage= / =canEdit= / =canAccept= 这类开关由服务端按 =project_member.role= 、
+需求的发布者与状态即时算出，前端只读这些布尔值决定按钮和页面能不能进（独立编辑页就是这样拦的）。
+=applies.type= 枚举里仍保留 =leader= ，但接口只接受 =participant= —— 项目始终有一个 leader，不再走申请。
 
 建表脚本是 =server/src/schema.sql= ，由 =npm run migrate= 执行：只建缺失的表、补缺失的列
 （例如 =sessions.auth_method= / =sessions.developer= ），不改已有列定义。
