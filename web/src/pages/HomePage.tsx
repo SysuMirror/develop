@@ -139,6 +139,7 @@ export default function HomePage() {
   const myId = user?.id ?? null;
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const myProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-leader', pageSize: PAGE_SIZE })}`);
+  const memberProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-member', pageSize: PAGE_SIZE })}`);
   const allProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ pageSize: PAGE_SIZE })}`);
   const feed = useDemandFeed();
 
@@ -150,6 +151,9 @@ export default function HomePage() {
   const resolved = latest(completed, (item) => item.completedAt ?? item.createdAt);
   const leading = myProjects.data?.items ?? [];
   const createdProjects = latest(allProjects.data?.items ?? [], (item) => item.createdAt);
+  // leader 与 participant 互斥，两个 total 相加即「我加入的全部项目」。
+  const joinedCount = (myProjects.data?.total ?? 0) + (memberProjects.data?.total ?? 0);
+  const joinedLoading = myProjects.loading || memberProjects.loading;
 
   const feedHint = feed.truncated ? `（基于最近 ${MAX_PAGES * PAGE_SIZE} 条）` : '';
 
@@ -165,6 +169,12 @@ export default function HomePage() {
       label: '进行中的需求',
       value: feed.loading ? '—' : myDemands.length,
       hint: '你接手且尚未完成',
+    },
+    {
+      to: '/me',
+      label: '我参与的项目',
+      value: joinedLoading ? '—' : joinedCount,
+      hint: '你是 leader 或成员的项目',
     },
     {
       to: '/projects?filter=mine-leader',
