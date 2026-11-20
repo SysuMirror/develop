@@ -99,6 +99,8 @@ export interface DemandItem {
   detail: string | null;
   status: DemandStatus;
   createdAt: string;
+  /** 当前版本号，等于被修改的次数；0 表示还是发布时的原文。 */
+  revision: number;
   acceptedAt: string | null;
   submittedAt: string | null;
   completedAt: string | null;

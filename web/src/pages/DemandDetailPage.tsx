@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, messageOf } from '../api';
 import { DemandActions } from '../demand-actions';
+import { DemandRevisions } from '../demand-revisions';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
 import { DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
@@ -49,6 +50,9 @@ export default function DemandDetailPage() {
             <span className="faint">
               发布 <TimeAgo value={demand.createdAt} />
             </span>
+            {demand.revision > 0 ? (
+              <span className="faint">已修改 {demand.revision} 次</span>
+            ) : null}
           </div>
         </div>
         <div className="row">
@@ -116,6 +120,8 @@ export default function DemandDetailPage() {
       <div className="panel">
         <MarkdownText source={demand.detail} empty="发布时没有填写详情。" />
       </div>
+
+      <DemandRevisions demandId={demand.id} revision={demand.revision} />
     </div>
   );
 }
