@@ -21,7 +21,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 | 概览       | =/=             | 用户 / 项目 / 待审申请 / 待接需求四个计数，最近项目、待我处理、需求风向 |
 | 登录       | =/login=        | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                     |
 | 项目列表   | =/projects=     | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页    |
-| 项目详情   | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、转让、释放、移除成员                 |
+| 项目详情   | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、转让、删除项目、移除成员                 |
 | 开发者列表 | =/users=        | 目录搜索（姓名 / 用户名），附参与项目数与 leader 次数                   |
 | 开发者详情 | =/users/:id=    | 资料、参与项目、申请记录、承接需求                                      |
 | 需求       | =/demands=      | 按状态（待接单 / 进行中 / 已完成）与标题筛选；接单、标记完成            |
@@ -93,7 +93,7 @@ external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden
 
 ** 资格回写
 
-资格写入（Join 方向）：申请通过时写 =is_developer= 为 =true= ；被 leader 移除、退出项目或释放项目后，
+资格写入（Join 方向）：申请通过时写 =is_developer= 为 =true= ；被 leader 移除、退出项目或项目被删除后，
 若已不属于任何项目则写 =false= 。写入失败不阻塞业务，落在 =developer_qual_sync= 表由后台按
 =QUAL_SYNC_INTERVAL_MS= 重试同一目标值（指数退避，最多 20 次； =400/401/403/404= 视为终态）。
 写入复用 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= ，平台侧需把本应用加入
@@ -111,26 +111,28 @@ external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden
   每行带 =myRole= 与 =myApplyStatus= 。
 - =GET /api/projects/:id= ：成员按 leader 优先、加入时间排序；需求按 waiting → accepted →
   completed 排序。返回 =permissions= （ =isMember= / =isLeader= / =canApply= / =canManage= ），
-  前端据此决定显示「申请加入」还是「申请成为 Leader」、以及是否显示管理按钮。
+  前端据此决定是否显示「申请加入」与是否显示管理按钮。
 
 ** leader 的动作
 
 创建项目 =POST /api/projects= ： =title= 必填且不超过 128 字， =misc= 可选；同一事务里写入
-projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建者即刻成为 leader。
+projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建者即刻成为 leader。项目始终
+恰好有一个 leader：没有「释放」，leader 要离开只能先转让，或者把整个项目删掉。
 
 - =PATCH /api/projects/:id= ：只有 leader 可改 =title= / =misc= ；没有可更新字段时 400。
 - =POST /api/projects/:id/transfer= ：把 leader 转给项目内已有成员——原 leader 降为
   =participant= 、目标升为 =leader= 、 =projects.leader_id= 同步更新。
-- =POST /api/projects/:id/release= ：leader 释放项目，删除自己的成员关系并把 =leader_id= 置空；
-  项目留在列表里等新的 leader 型申请。
+- =DELETE /api/projects/:id= ：只有 leader 可删。项目里还有 =accepted= 需求时返回 409
+  =DEMAND_IN_PROGRESS= ；否则在一个事务里删掉 applies、demands、project_member 与 projects，
+  再对每个被移除的成员做一次资格回收（见下）。
 - =DELETE /api/projects/:id/members/:userId= ：移除成员，不能移除 leader 本人。
 
 ** 成员的退出与被移除
 
-=DELETE /api/projects/:id/members/me= 退出项目。leader 必须先转让或释放，否则 409
+=DELETE /api/projects/:id/members/me= 退出项目。leader 必须先转让或删除项目，否则 409
 =LEADER_MUST_TRANSFER= 。
 
-以上三种「离开项目」（释放、退出、被移除）之后都会调用 =syncAfterRemoval= ：若该用户已不属于
+以上三种「离开项目」（退出、被移除、项目被删除）之后都会调用 =syncAfterRemoval= ：若该用户已不属于
 任何项目，就排一条 =is_developer= 为 =false= 的资格回写。
 
 ** 拒绝的请求
@@ -139,39 +141,35 @@ projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建�
 |------+------------------------+----------------------------------------|
 |  400 | =BAD_TITLE=            | 标题为空或超过 128 字                  |
 |  400 | =NOTHING_TO_UPDATE=    | PATCH 没有任何可更新字段               |
-|  403 | =NOT_LEADER=           | 非 leader 改项目、转让、释放、移除成员 |
+|  403 | =NOT_LEADER=           | 非 leader 改项目、转让、删除项目、移除成员 |
 |  403 | =CANNOT_FIRE_LEADER=   | 移除目标就是 leader                    |
 |  404 | =NOT_FOUND=            | 项目不存在，或目标用户不是项目成员     |
+|  409 | =DEMAND_IN_PROGRESS=  | 项目还有进行中的需求时删除项目         |
 |  409 | =LEADER_MUST_TRANSFER= | leader 直接退出项目                    |
 
 * 四、申请
 
 ** 提交与重复申请
 
-=POST /api/projects/:id/applies= ， =type= 取 =leader= 或 =participant= （默认后者）， =note= 可选
+=POST /api/projects/:id/applies= ，只接受 =type= 为 =participant= （缺省值）， =note= 可选
 （落库上限 500 字）。同一 =(project_id, user_id, type)= 只有一条记录：
 
 - 已是成员或 leader → 409 =ALREADY_MEMBER= ；
-- 申请 leader 但项目已有 leader → 409 =LEADER_EXISTS= ；
 - 同类型已有 waiting 申请 → 409 =DUPLICATE_APPLY= ；
 - 同类型申请已通过 → 409 =ALREADY_MEMBER= ；
 - 同类型申请被拒过 → 复用该行，重置为 waiting、清空裁决痕迹、刷新时间，返回 201。
 
 ** 审批
 
-=GET /api/applies/inbox= 只列 waiting 且「我是该项目 leader」或「项目 leader 缺位且这是 leader
-型申请」的记录； =GET /api/applies/mine= 列自己最近 100 条申请。
+=GET /api/applies/inbox= 只列 waiting 且「我是该项目 leader」的记录； =GET /api/applies/mine= 列自己最近 100 条申请。
 
 =POST /api/applies/:id/accept= 在一个事务里完成：
 
-1. 写入或更新 =project_member= ，角色取申请类型；
-2. =type= 为 leader 时，仅当 =projects.leader_id IS NULL= 才写入，否则整体 409 =LEADER_EXISTS=
-   （防止两人同时被批成 leader）；
-3. 该申请置 =accepted= ，同项目其余 waiting 申请自动置 =rejected= ；
-4. 事务外排一条 =is_developer= 为 =true= 的资格回写，失败只记日志。
+1. 写入或更新 =project_member= ，角色一律为 =participant= ；
+2. 该申请置 =accepted= ，同项目其余 waiting 申请自动置 =rejected= ；
+3. 事务外排一条 =is_developer= 为 =true= 的资格回写，失败只记日志。
 
-=POST /api/applies/:id/reject= 把 waiting 申请置 =rejected= 。审批人只能是项目 leader；
-leader 缺位的项目没有可授权的人，按先到先得，任何登录开发者都能处理 leader 型申请。
+=POST /api/applies/:id/reject= 把 waiting 申请置 =rejected= 。审批人只能是项目 leader。
 
 ** 撤回
 
@@ -181,12 +179,11 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 
 | 状态 | code              | 触发条件                              |
 |------+-------------------+---------------------------------------|
-|  400 | =BAD_TYPE=        | =type= 不是 leader / participant      |
+|  400 | =BAD_TYPE=        | =type= 不是 participant               |
 |  403 | =NOT_LEADER=      | 非该项目 leader 审批                  |
 |  403 | =NOT_OWNER=       | 撤回别人的申请                        |
 |  404 | =NOT_FOUND=       | 申请或项目不存在                      |
 |  409 | =ALREADY_MEMBER=  | 已是成员 / 已是 leader / 该申请已通过 |
-|  409 | =LEADER_EXISTS=   | 项目已有 leader 时申请或审批 leader   |
 |  409 | =DUPLICATE_APPLY= | 同类型已有等待中的申请                |
 |  409 | =NOT_PENDING=     | 审批或撤回已经结束的申请              |
 
@@ -223,7 +220,7 @@ leader 缺位的项目没有可授权的人，按先到先得，任何登录开�
 | 未登录           | —                                                                   | 只能打开 =/login= 与 =/api/health=                      |
 | 普通统一身份用户 | UniSSO 登录成功                                                     | 已登录但 =developer= 不为严格 =true= 时业务接口一律 403 |
 | 开发者           | UniSSO 的 =users.is_developer= 为 =true= ；申请通过后由资格回写授予 | 项目 / 申请 / 需求全部读写                              |
-| 项目 leader      | 建项目即成为 leader；或经转让、审批 leader 型申请                   | 改项目信息、审批申请、移除成员、转让、释放              |
+| 项目 leader      | 建项目即成为 leader；或经转让                                      | 改项目信息、审批申请、移除成员、转让、删除项目          |
 | 项目成员         | 申请通过后写入 =project_member=                                     | 发布需求、标记需求完成、自行退出项目                    |
 | 需求接单人       | 接单（写入 =demands.user_id= ）                                     | 标记自己接的需求完成                                    |
 
@@ -510,10 +507,10 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | GET    | =/api/projects/:id=                 | 开发者 | 详情 + 成员 + 需求 + permissions       |
 | PATCH  | =/api/projects/:id=                 | leader | 改 title / misc                        |
 | POST   | =/api/projects/:id/transfer=        | leader | 转让给项目内成员                       |
-| POST   | =/api/projects/:id/release=         | leader | 释放项目，leader_id 置空               |
-| DELETE | =/api/projects/:id/members/me=      | 成员   | 退出项目（leader 需先转让或释放）      |
+| DELETE | =/api/projects/:id=                 | leader | 删除项目（没有进行中的需求时）         |
+| DELETE | =/api/projects/:id/members/me=      | 成员   | 退出项目（leader 需先转让或删除项目）  |
 | DELETE | =/api/projects/:id/members/:userId= | leader | 移除成员，不能移除 leader              |
-| POST   | =/api/projects/:id/applies=         | 开发者 | 提交 leader / participant 申请         |
+| POST   | =/api/projects/:id/applies=         | 开发者 | 提交 participant 申请                  |
 | GET    | =/api/applies/mine=                 | 开发者 | 自己的申请（最近 100 条）              |
 | GET    | =/api/applies/inbox=                | 开发者 | 等我审批的 waiting 申请                |
 | POST   | =/api/applies/:id/accept=           | leader | 通过申请，其余 waiting 自动拒绝        |
@@ -579,7 +576,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       demo-users.ts   # DEV_LOGIN 演示身份
       routes/
         users.ts      # 目录搜索 / 用户详情
-        projects.ts   # 项目 CRUD、转让、释放、成员移除
+        projects.ts   # 项目 CRUD、转让、删除、成员移除
         applies.ts    # 申请、审批、撤回
         demands.ts    # 需求发布、接单、完成
         join.ts       # join 平台接入（共享密钥）
