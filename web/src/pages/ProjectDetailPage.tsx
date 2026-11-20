@@ -258,7 +258,7 @@ export default function ProjectDetailPage() {
       <div className="section-head">
         <h2>需求</h2>
         <span className="faint">
-          {data.demands.length} 条 · 接单与标记完成在需求页或需求详情里操作
+          {data.demands.length} 条 · 接单、提交与验收在需求页或需求详情里操作
         </span>
       </div>
       {data.demands.length === 0 ? (
@@ -415,7 +415,7 @@ function KickMemberDialog({ open, name, busy, onClose, onConfirm }: KickMemberDi
       }
     >
       <p className="faint" style={{ margin: 0 }}>
-        已接下的需求不会被取消，对方仍可在需求详情里标记完成。
+        已接下的需求不会被取消，对方仍可在需求详情里提交完成。
       </p>
     </Modal>
   );

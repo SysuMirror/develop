@@ -18,9 +18,11 @@ export const APPLY_STATUS: Record<ApplyStatus, StatusMeta> = {
 };
 
 export const DEMAND_STATUS: Record<DemandStatus, StatusMeta> = {
-  waiting: { label: '待接单', tone: 'amber' },
+  waiting: { label: '待接单', tone: 'gray' },
   accepted: { label: '进行中', tone: 'blue' },
+  review: { label: '待确认', tone: 'amber' },
   completed: { label: '已完成', tone: 'green' },
+  suspended: { label: '挂起', tone: 'gray' },
 };
 
 export const ROLE: Record<Role, StatusMeta> = {

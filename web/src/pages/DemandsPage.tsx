@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { api, messageOf, qs } from '../api';
-import { useAuth } from '../auth';
+import { qs } from '../api';
+import { DemandActions } from '../demand-actions';
 import { useApi, useDebounced } from '../hooks';
-import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName, useToast } from '../ui';
+import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem, Paged } from '../types';
 
 interface TabItem {
@@ -16,63 +16,28 @@ const TABS: TabItem[] = [
   { key: '', label: '全部' },
   { key: 'waiting', label: '待接单' },
   { key: 'accepted', label: '进行中' },
+  { key: 'review', label: '待确认' },
   { key: 'completed', label: '已完成' },
+  { key: 'suspended', label: '挂起' },
+];
+
+const SCOPES: TabItem[] = [
+  { key: '', label: '全部需求' },
+  { key: 'created', label: '我发布的' },
+  { key: 'assigned', label: '我接的' },
 ];
 
 export default function DemandsPage() {
-  const { user } = useAuth();
-  const { push } = useToast();
   const [status, setStatus] = useState('');
+  const [scope, setScope] = useState('');
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
-  const [busy, setBusy] = useState(false);
   const q = useDebounced(term);
   const pageSize = 15;
-  const { data, loading, error, reload } = useApi<Paged<DemandItem>>(`/demands${qs({ status, q, page, pageSize })}`);
+  const { data, loading, error, reload } = useApi<Paged<DemandItem>>(
+    `/demands${qs({ status, scope, q, page, pageSize })}`,
+  );
   const items = data?.items ?? [];
-  const myId = user?.id;
-
-  async function act(path: string, okMessage: string) {
-    setBusy(true);
-    try {
-      await api.post(path);
-      push(okMessage, 'success');
-      reload();
-    } catch (err) {
-      push(messageOf(err), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function renderAction(demand: DemandItem): ReactNode {
-    if (demand.status === 'waiting') {
-      if (demand.creator?.id === myId) return <span className="faint">—</span>;
-      return (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={busy}
-          onClick={() => act(`/demands/${demand.id}/accept`, '已接单')}
-        >
-          接单
-        </button>
-      );
-    }
-    if (demand.status === 'accepted' && (demand.assignee?.id === myId || demand.creator?.id === myId)) {
-      return (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={busy}
-          onClick={() => act(`/demands/${demand.id}/complete`, '已标记完成')}
-        >
-          完成
-        </button>
-      );
-    }
-    return <span className="faint">—</span>;
-  }
 
   let content: ReactNode;
   if (loading) {
@@ -121,7 +86,9 @@ export default function DemandsPage() {
                     <TimeAgo value={demand.createdAt} />
                   </div>
                 </td>
-                <td className="right">{renderAction(demand)}</td>
+                <td className="right">
+                  <DemandActions demand={demand} onChanged={reload} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -135,7 +102,9 @@ export default function DemandsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">需求</h1>
-          <p className="page-sub">项目成员发布的任务。接单即代表你负责推进，完成后由发布者或接单人标记。</p>
+          <p className="page-sub">
+            项目成员发布的任务。接单人推进完后提交完成，由发布者或项目 leader 验收才算完成；发布者也可以挂起需求。
+          </p>
         </div>
       </div>
 
@@ -156,6 +125,21 @@ export default function DemandsPage() {
       </div>
 
       <div className="toolbar">
+        <div className="filter-chips">
+          {SCOPES.map((item) => (
+            <button
+              type="button"
+              key={item.key || 'all'}
+              className={scope === item.key ? 'chip active' : 'chip'}
+              onClick={() => {
+                setScope(item.key);
+                setPage(1);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <div className="search">
           <input
             className="input"

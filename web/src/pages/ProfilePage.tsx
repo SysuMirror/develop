@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { api, messageOf, qs } from '../api';
 import { useAuth } from '../auth';
+import { DemandActions } from '../demand-actions';
 import { DEMAND_MAX_PAGES, DEMAND_PAGE_SIZE, sortByTimeDesc, useApi, useDemandFeed } from '../hooks';
 import {
   APPLY_TYPE,
@@ -35,7 +36,15 @@ function DemandRow({
         <div className="faint truncate">
           <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
           {' · '}
-          <TimeAgo value={demand.status === 'completed' ? demand.completedAt : demand.acceptedAt} />
+          <TimeAgo
+            value={
+              demand.status === 'completed'
+                ? demand.completedAt
+                : demand.status === 'review'
+                  ? demand.submittedAt
+                  : demand.acceptedAt
+            }
+          />
         </div>
       </div>
       <div className="row" style={{ gap: 8 }}>
@@ -58,8 +67,8 @@ export default function ProfilePage() {
   const inboxItems = inbox.data?.items ?? [];
   const myDemands = feed.items.filter((demand) => demand.assignee?.id === user?.id);
   const ongoing = sortByTimeDesc(
-    myDemands.filter((demand) => demand.status === 'accepted'),
-    (demand) => demand.acceptedAt ?? demand.createdAt,
+    myDemands.filter((demand) => demand.status === 'accepted' || demand.status === 'review'),
+    (demand) => demand.submittedAt ?? demand.acceptedAt ?? demand.createdAt,
   );
   const completed = sortByTimeDesc(
     myDemands.filter((demand) => demand.status === 'completed'),
@@ -183,20 +192,7 @@ export default function ProfilePage() {
       <div className="panel">
         <div className="list">
           {ongoing.map((demand) => (
-            <DemandRow
-              key={demand.id}
-              demand={demand}
-              action={
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={busy}
-                  onClick={() => act(`/demands/${demand.id}/complete`, 'POST', '需求已标记完成')}
-                >
-                  标记完成
-                </button>
-              }
-            />
+            <DemandRow key={demand.id} demand={demand} action={<DemandActions demand={demand} onChanged={feed.reload} empty={null} />} />
           ))}
           {completed.map((demand) => (
             <DemandRow key={demand.id} demand={demand} />

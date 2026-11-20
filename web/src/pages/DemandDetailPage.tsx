@@ -1,62 +1,14 @@
-import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { ReactNode } from 'react';
-import { ApiError, api, messageOf } from '../api';
-import { useAuth } from '../auth';
+import { ApiError, messageOf } from '../api';
+import { DemandActions } from '../demand-actions';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
-import { DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName, useToast } from '../ui';
+import { DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem } from '../types';
 
 export default function DemandDetailPage() {
   const { id } = useParams();
-  const { user } = useAuth();
-  const { push } = useToast();
-  const [busy, setBusy] = useState(false);
   const { data, loading, error, reload } = useApi<DemandItem>(`/demands/${id}`);
-  const myId = user?.id;
-
-  async function act(path: string, okMessage: string) {
-    setBusy(true);
-    try {
-      await api.post(path);
-      push(okMessage, 'success');
-      reload();
-    } catch (err) {
-      push(messageOf(err), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // 与需求列表页同规则：待接单可接（不能接自己发的），已接单可由接单人/发布者标记完成。
-  function renderAction(demand: DemandItem): ReactNode {
-    if (demand.status === 'waiting' && demand.creator?.id !== myId) {
-      return (
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          disabled={busy}
-          onClick={() => act(`/demands/${demand.id}/accept`, '已接单')}
-        >
-          接单
-        </button>
-      );
-    }
-    if (demand.status === 'accepted' && (demand.assignee?.id === myId || demand.creator?.id === myId)) {
-      return (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={busy}
-          onClick={() => act(`/demands/${demand.id}/complete`, '已标记完成')}
-        >
-          标记完成
-        </button>
-      );
-    }
-    return null;
-  }
 
   if (loading) {
     return (
@@ -98,7 +50,9 @@ export default function DemandDetailPage() {
             </span>
           </div>
         </div>
-        <div className="row">{renderAction(demand)}</div>
+        <div className="row">
+          <DemandActions demand={demand} onChanged={reload} empty={null} />
+        </div>
       </div>
 
       <div className="panel">
@@ -131,9 +85,17 @@ export default function DemandDetailPage() {
               <span className="faint">等待接单</span>
             )}
           </dd>
+          {demand.submittedAt ? (
+            <>
+              <dt>提交完成</dt>
+              <dd className="faint">
+                <TimeAgo value={demand.submittedAt} />
+              </dd>
+            </>
+          ) : null}
           {demand.completedAt ? (
             <>
-              <dt>完成</dt>
+              <dt>验收完成</dt>
               <dd className="faint">
                 <TimeAgo value={demand.completedAt} />
               </dd>

@@ -1,7 +1,7 @@
 // 与 server 端 JSON 响应对齐的类型；后端改了字段，这里要同步。
 
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
-export type DemandStatus = 'waiting' | 'accepted' | 'completed';
+export type DemandStatus = 'waiting' | 'accepted' | 'review' | 'completed' | 'suspended';
 export type Role = 'leader' | 'participant';
 export type ApplyType = 'leader' | 'participant';
 export type ApplySource = 'web' | 'join';
@@ -83,6 +83,15 @@ export interface ProjectDetail extends ProjectSummary {
   permissions: ProjectPermissions;
 }
 
+// 服务端按当前登录者算好的动作开关，前端不再自己推断权限。
+export interface DemandPermissions {
+  canAccept: boolean;
+  canSubmit: boolean;
+  canReview: boolean;
+  canSuspend: boolean;
+  canResume: boolean;
+}
+
 export interface DemandItem {
   id: number;
   title: string;
@@ -90,10 +99,12 @@ export interface DemandItem {
   status: DemandStatus;
   createdAt: string;
   acceptedAt: string | null;
+  submittedAt: string | null;
   completedAt: string | null;
   project: { id: number; title: string };
   creator: UserRef;
   assignee: UserRef | null;
+  permissions: DemandPermissions;
 }
 
 export interface ApplyItem {
