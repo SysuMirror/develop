@@ -22,7 +22,7 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 | 登录     | =/login=        | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                 |
 | 项目列表 | =/projects=     | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页 |
 | 项目详情 | =/projects/:id= | 成员、需求、申请箱；leader 可编辑、删除项目、移除成员                |
-| 需求     | =/demands=      | 五种状态页签与「全部 / 我发布的 / 我接的」视角；接单、提交、验收、挂起 |
+| 需求     | =/demands=      | 五种状态页签与「全部 / 我发布的 / 我接的」视角；接单、提交、验收、挂起、编辑 |
 | 需求详情 | =/demands/:id=  | 状态、项目、发布者、接单人；正文按 Markdown 渲染；动作同需求页       |
 | 我的     | =/me=           | 待我审批、我参与的项目、个人参与的需求                               |
 
@@ -202,12 +202,15 @@ completed；驳回把 review 退回 accepted，接单人不变；挂起记录来
   =scope= 取 =created= 或 =assigned= 时只看我发布的 / 我接的。排序是 waiting → accepted →
   review → completed → suspended，同状态按发布时间倒序。
 - =GET /api/demands/:id= ： 单条需求，字段与列表项一致；不存在的 id 返回 404 =NOT_FOUND= 。
-- 每条需求带 =permissions= （ =canAccept= / =canSubmit= / =canReview= / =canSuspend= /
-  =canResume= ），服务端按当前登录者算好，前端只照着渲染按钮。
+- 每条需求带 =permissions= （ =canEdit= / =canAccept= / =canSubmit= / =canReview= /
+  =canSuspend= / =canResume= ），服务端按当前登录者算好，前端只照着渲染按钮。
 - =POST /api/projects/:id/demands= ：项目成员才能发布， =title= 必填且不超过 128 字， =detail= 可选。
   同一项目内标题唯一（大小写不敏感），重名返回 409 =DUPLICATE_TITLE= ；不同项目可以各自发布
   同名需求，已完成的需求也同样占着这个名字。 =detail= 按 Markdown 原样存储，前端在需求详情页渲染
   （不引 =rehype-raw= ，正文里的裸 HTML 不执行）。
+- =PATCH /api/demands/:id= ：只有发布者能改 =title= 与 =detail= ，且仅限待接单、进行中、挂起
+  三种状态；待确认与已完成锁定，避免验收对象被改。标题同样受项目内唯一约束，重名返回 409
+  =DUPLICATE_TITLE= ，空标题返回 400 =BAD_TITLE= 。
 - =POST /api/demands/:id/accept= ：只能接 waiting 的需求，不能接自己发布的；写入 =user_id= 与
   =accepted_at= 。更新条件带 =AND status='waiting'= ，并发接单只有一方成功。
 - =POST /api/demands/:id/submit= ：只有接单人可以提交完成， accepted → review，写入 =submitted_at= 。
@@ -222,11 +225,13 @@ completed；驳回把 review 退回 accepted，接单人不变；挂起记录来
 |  400 | =BAD_TITLE=        | 标题为空或超过 128 字                        |
 |  403 | =NOT_MEMBER=       | 非项目成员发布需求                           |
 |  403 | =SELF_ACCEPT=      | 接自己发布的需求                             |
+|  403 | =NOT_CREATOR=      | 非发布者修改需求                             |
 |  403 | =NOT_ASSIGNEE=     | 不是接单人却提交完成                         |
 |  403 | =NOT_REVIEWER=     | 非发布者、非项目 leader 验收、驳回、挂起或恢复 |
 |  404 | =NOT_FOUND=        | 需求不存在                                   |
 |  409 | =NOT_PENDING=      | 接已接单 / 已完成 / 挂起的需求               |
 |  409 | =NOT_ACCEPTED=     | 提交完成时需求不在进行中                     |
+|  409 | =NOT_EDITABLE=     | 待确认或已完成的需求试图修改                 |
 |  409 | =NOT_IN_REVIEW=    | 验收或驳回时需求不在待确认                   |
 |  409 | =CANNOT_SUSPEND=   | 已完成或已挂起的需求再挂起                   |
 |  409 | =NOT_SUSPENDED=    | 恢复一个没有挂起的需求                       |
@@ -536,6 +541,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | GET    | =/api/demands/:id=                  | 开发者 | 单条需求，404 为 =NOT_FOUND=           |
 | POST   | =/api/projects/:id/demands=         | 成员   | 发布需求，同项目内标题唯一             |
 | POST   | =/api/demands/:id/accept=           | 开发者 | 接单，不能接自己发的                   |
+| PATCH  | =/api/demands/:id=                  | 发布者 | 改标题与详情，仅待接单 / 进行中 / 挂起 |
 | POST   | =/api/demands/:id/submit=           | 接单人 | 提交完成，进入待确认                   |
 | POST   | =/api/demands/:id/confirm=          | 发布者 | 发布者 / leader 验收通过               |
 | POST   | =/api/demands/:id/reject=           | 发布者 | 驳回，退回进行中                       |
@@ -584,7 +590,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       routes/
         projects.ts   # 项目 CRUD、删除、成员移除
         applies.ts    # 申请、审批、撤回
-        demands.ts    # 需求发布、接单、提交、验收、挂起
+        demands.ts    # 需求发布、编辑、接单、提交、验收、挂起
         join.ts       # join 平台接入（共享密钥）
     run-dev.sh        # 本地/容器内重启后端并自检
   web/
