@@ -197,18 +197,6 @@ export async function remember(raw: RawUser | null | undefined): Promise<void> {
   if (stored) await saveProfile(stored);
 }
 
-// 目录里没有的人从 user_profile 落库缓存补。表很小（每个登录过的人一行），
-// 一次全取比逐 id 拼 SQL 简单；目录可用时也没必要按 id 过滤。
-async function readCachedProfiles(directory: Map<string, DirectoryUser>): Promise<DirectoryUser[]> {
-  try {
-    const rows = await query<ProfileRow>('SELECT user_id, name, avatar, email FROM user_profile');
-    return rows.filter((row) => !directory.has(String(row.user_id))).map(fromProfileRow);
-  } catch (error) {
-    console.error('[directory] user_profile 读取失败：', messageOfError(error));
-    return [];
-  }
-}
-
 export async function getUser(id: unknown): Promise<DirectoryUser | null> {
   if (!id) return null;
   const users = await getUsers([id]);
@@ -248,37 +236,6 @@ export async function lookup(id: unknown): Promise<LookupResult> {
   const user = directory.get(key) ?? (await readProfiles([key])).get(key) ?? null;
   if (user) return { known: true, user };
   return { known: stale ? null : false, user: null };
-}
-
-export interface SearchUsersOptions {
-  q?: unknown;
-  page?: number;
-  pageSize?: number;
-}
-
-export interface SearchUsersResult {
-  items: DirectoryUser[];
-  total: number;
-  stale: boolean;
-}
-
-export async function searchUsers({ q = '', page = 1, pageSize = 20 }: SearchUsersOptions = {}): Promise<SearchUsersResult> {
-  const { users: directory, stale } = await snapshot();
-  // 目录 ∪ user_profile：登录过但目录查不到的人（或目录完全不可用时）靠缓存显示名字。
-  const cachedUsers = await readCachedProfiles(directory);
-  const term = String(q ?? '').trim().toLowerCase();
-  let list = [...directory.values(), ...cachedUsers].filter((user) => user.active !== false);
-  if (term) {
-    list = list.filter((user) =>
-      [user.name, user.username, user.email, user.id].some((value) =>
-        value ? String(value).toLowerCase().includes(term) : false,
-      ),
-    );
-  }
-  list.sort((a, b) => String(a.name || a.username || a.id).localeCompare(String(b.name || b.username || b.id), 'zh'));
-  const total = list.length;
-  const offset = (page - 1) * pageSize;
-  return { items: list.slice(offset, offset + pageSize), total, stale };
 }
 
 // 接口里引用某个用户时的统一形状；user 缺失说明目录里没有或目录不可用，前端显示「未知用户」。

@@ -10,7 +10,6 @@ import { pool } from './db.ts';
 import { startQualSyncWorker } from './qual-sync.ts';
 import appliesRouter from './routes/applies.ts';
 import demandsRouter from './routes/demands.ts';
-import usersRouter from './routes/users.ts';
 import joinRouter from './routes/join.ts';
 import projectsRouter from './routes/projects.ts';
 
@@ -80,7 +79,6 @@ export function createApp(): express.Express {
   app.use('/api', auth.requireUser);
   // 开发者业务要求 UniSSO userinfo 的 developer 严格为 true（DEV_LOGIN 会话除外）。
   app.use('/api', wrap(auth.requireDeveloper));
-  app.use('/api', usersRouter);
   app.use('/api', projectsRouter);
   app.use('/api', appliesRouter);
   app.use('/api', demandsRouter);
