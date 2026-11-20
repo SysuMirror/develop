@@ -158,6 +158,11 @@ async function migrate(): Promise<void> {
     'status_before_suspend',
     "ALTER TABLE demands ADD COLUMN status_before_suspend ENUM('waiting','accepted','review') NULL AFTER status",
   );
+  await ensureColumn(
+    'demands',
+    'revision',
+    'ALTER TABLE demands ADD COLUMN revision INT UNSIGNED NOT NULL DEFAULT 0 AFTER completed_at',
+  );
   await ensureDemandStatusEnum();
   // 去重必须排在唯一索引之前，否则 ALTER 会因重复键失败。
   await dedupeDemands();

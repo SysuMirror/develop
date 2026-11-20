@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { loadProject, requireMember } from '../access.ts';
-import { execute, isDuplicateEntry, one, query } from '../db.ts';
+import { isDuplicateEntry, one, query, withTx } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
 import type { DemandJoinedRow, DemandRow, DemandStatus, DirectoryUser } from '../types.ts';
@@ -11,7 +11,7 @@ const DEMAND_SELECT = `
   SELECT d.id, d.title, d.detail, d.status, d.status_before_suspend,
          d.created_at, d.accepted_at, d.submitted_at, d.completed_at,
          d.created_by,
-         d.user_id,
+         d.user_id, d.revision,
          d.project_id, p.title AS project_title, p.leader_id
     FROM demands d
     JOIN projects p ON p.id = d.project_id`;
@@ -45,6 +45,7 @@ function mapDemand(row: DemandJoinedRow, people: Map<string, DirectoryUser>, vie
     detail: row.detail,
     status: row.status,
     createdAt: row.created_at,
+    revision: Number(row.revision),
     acceptedAt: row.accepted_at,
     submittedAt: row.submitted_at,
     completedAt: row.completed_at,
@@ -151,10 +152,19 @@ router.post(
     if (duplicate) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
     let inserted: { insertId: number };
     try {
-      inserted = await execute(
-        "INSERT INTO demands (project_id, title, detail, created_by, status) VALUES (?, ?, ?, ?, 'waiting')",
-        [project.id, title, detail, user.id],
-      );
+      // 需求行与 v0 快照同事务写入：只落半边会让修订历史少了发布时的原文。
+      inserted = await withTx(async (conn) => {
+        const [result] = await conn.query(
+          "INSERT INTO demands (project_id, title, detail, created_by, status) VALUES (?, ?, ?, ?, 'waiting')",
+          [project.id, title, detail, user.id],
+        );
+        const header = result as { insertId: number };
+        await conn.query(
+          'INSERT INTO demand_revision (demand_id, revision, title, detail, editor_id) VALUES (?, 0, ?, ?, ?)',
+          [header.insertId, title, detail, user.id],
+        );
+        return header;
+      });
     } catch (error) {
       // 并发发布同名：唯一键兜底，翻译成同一个 409，不冒 500。
       if (isDuplicateEntry(error)) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
@@ -185,8 +195,26 @@ router.patch(
       demand.id,
     ]);
     if (duplicate) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
+    const nextDetail = detail ? detail : null;
+    // 内容没变就不算一次修改：避免点开编辑又原样保存把版本号刷上去。
+    if (title === demand.title && nextDetail === (demand.detail ?? null)) {
+      await respond(res, demand.id, user.id);
+      return;
+    }
+    const nextRevision = Number(demand.revision) + 1;
     try {
-      await query('UPDATE demands SET title = ?, detail = ? WHERE id = ?', [title, detail || null, demand.id]);
+      await withTx(async (conn) => {
+        await conn.query('UPDATE demands SET title = ?, detail = ?, revision = ? WHERE id = ?', [
+          title,
+          nextDetail,
+          nextRevision,
+          demand.id,
+        ]);
+        await conn.query(
+          'INSERT INTO demand_revision (demand_id, revision, title, detail, editor_id) VALUES (?, ?, ?, ?, ?)',
+          [demand.id, nextRevision, title, nextDetail, user.id],
+        );
+      });
     } catch (error) {
       if (isDuplicateEntry(error)) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
       throw error;

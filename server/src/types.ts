@@ -103,11 +103,24 @@ export interface DemandRow {
   submitted_at: Date | null;
   completed_at: Date | null;
   status_before_suspend: DemandSuspendFrom | null;
+  /** 当前版本号，等于被修改的次数。 */
+  revision: number;
 }
 
 export interface DemandJoinedRow extends DemandRow {
   project_title: string;
   leader_id: string | null;
+}
+
+/** demand_revision 快照行：revision 0 是发布时的原文。 */
+export interface DemandRevisionRow {
+  id: number;
+  demand_id: number;
+  revision: number;
+  title: string;
+  detail: string | null;
+  editor_id: string | null;
+  created_at: Date;
 }
 
 export interface SessionRow {

@@ -59,11 +59,27 @@ CREATE TABLE IF NOT EXISTS demands (
   accepted_at DATETIME NULL,
   submitted_at DATETIME NULL,
   completed_at DATETIME NULL,
+  -- 当前版本号，等于被修改的次数；0 表示还是发布时的原文。
+  revision INT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   UNIQUE KEY uk_demands_project_title (project_id, title),
   KEY idx_demands_project (project_id),
   KEY idx_demands_user (user_id),
   KEY idx_demands_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- 需求正文的版本快照：revision 0 是发布时的原文，之后每次修改追加一条。
+-- 存完整正文而不是补丁，diff 由前端对相邻两版计算。
+CREATE TABLE IF NOT EXISTS demand_revision (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  demand_id INT UNSIGNED NOT NULL,
+  revision INT UNSIGNED NOT NULL,
+  title VARCHAR(128) NOT NULL,
+  detail TEXT NULL,
+  editor_id VARCHAR(36) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_revision_demand_no (demand_id, revision)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- 展示用资料缓存：登录回调把 userinfo 的姓名/头像/邮箱抄一份，目录接口不可用时兜底。
