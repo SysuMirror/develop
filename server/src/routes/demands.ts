@@ -17,16 +17,19 @@ const DEMAND_SELECT = `
     JOIN projects p ON p.id = d.project_id`;
 
 const SUSPENDABLE: DemandStatus[] = ['waiting', 'accepted', 'review'];
+// 待确认、已完成的需求已经进入验收／结案，改动会让验收对象和记录失真。
+const EDITABLE: DemandStatus[] = ['waiting', 'accepted', 'suspended'];
 
 type Viewer = { id: string; leader: string | null; createdBy: string; assignee: string | null; status: DemandStatus };
 
 function permissionsOf(viewer: Viewer | null) {
   if (!viewer) {
-    return { canAccept: false, canSubmit: false, canReview: false, canSuspend: false, canResume: false };
+    return { canEdit: false, canAccept: false, canSubmit: false, canReview: false, canSuspend: false, canResume: false };
   }
   const isOwner = viewer.id === viewer.createdBy || viewer.id === viewer.leader;
   const isAssignee = viewer.assignee !== null && viewer.id === viewer.assignee;
   return {
+    canEdit: viewer.id === viewer.createdBy && EDITABLE.includes(viewer.status),
     canAccept: viewer.status === 'waiting' && viewer.id !== viewer.createdBy,
     canSubmit: viewer.status === 'accepted' && isAssignee,
     canReview: viewer.status === 'review' && isOwner,
@@ -159,6 +162,34 @@ router.post(
     }
     await respond(res, inserted.insertId, user.id);
     res.status(201);
+  }),
+);
+
+// 发布者可以修订标题与详情，验收开始后即锁定；标题仍受项目内唯一约束。
+router.patch(
+  '/demands/:id',
+  wrap(async (req, res) => {
+    const user = req.user;
+    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
+    const demand = await loadJoinedDemand(Number(req.params.id));
+    if (demand.created_by !== user.id) throw forbidden('NOT_CREATOR', '只有发布者可以修改需求');
+    if (!EDITABLE.includes(demand.status)) throw conflict('NOT_EDITABLE', '待确认或已完成的需求不能修改');
+    const title = String(req.body?.title ?? demand.title).trim();
+    const detail = req.body?.detail === undefined ? demand.detail : req.body.detail === null ? null : String(req.body.detail).trim();
+    if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
+    const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ? AND id <> ?', [
+      demand.project_id,
+      title,
+      demand.id,
+    ]);
+    if (duplicate) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
+    try {
+      await query('UPDATE demands SET title = ?, detail = ? WHERE id = ?', [title, detail || null, demand.id]);
+    } catch (error) {
+      if (isDuplicateEntry(error)) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
+      throw error;
+    }
+    await respond(res, demand.id, user.id);
   }),
 );
 
