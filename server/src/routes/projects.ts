@@ -205,33 +205,6 @@ router.patch(
   }),
 );
 
-router.post(
-  '/projects/:id/transfer',
-  wrap(async (req, res) => {
-    const project = await loadProject(req.params.id);
-    const user = req.user;
-    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    await requireLeader(project, user);
-    const targetId = String(req.body?.userId ?? '').trim();
-    if (!targetId) throw badRequest('BAD_REQUEST', '缺少 userId');
-    if (targetId === user.id) throw badRequest('BAD_REQUEST', '不能转让给自己');
-    const target = await loadMembership(project.id, targetId);
-    if (!target) throw notFound('目标用户不是项目成员');
-    await withTx(async (conn) => {
-      await conn.query("UPDATE project_member SET role = 'participant' WHERE project_id = ? AND user_id = ?", [
-        project.id,
-        user.id,
-      ]);
-      await conn.query("UPDATE project_member SET role = 'leader' WHERE project_id = ? AND user_id = ?", [
-        project.id,
-        targetId,
-      ]);
-      await conn.query('UPDATE projects SET leader_id = ? WHERE id = ?', [targetId, project.id]);
-    });
-    res.json({ ok: true });
-  }),
-);
-
 router.delete(
   '/projects/:id',
   wrap(async (req, res) => {
@@ -269,7 +242,7 @@ router.delete(
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     if (project.leader_id === user.id) {
-      throw conflict('LEADER_MUST_TRANSFER', 'leader 需要先转让或删除项目，再退出');
+      throw conflict('LEADER_CANNOT_LEAVE', 'leader 不能退出项目；不需要它时请删除项目');
     }
     const membership = await loadMembership(project.id, user.id);
     if (!membership) throw notFound('你不是该项目成员');
