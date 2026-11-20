@@ -122,7 +122,7 @@ router.get(
       `SELECT d.id, d.title, d.detail, d.status, d.created_at, d.user_id
          FROM demands d
         WHERE d.project_id = ?
-        ORDER BY FIELD(d.status, 'waiting', 'accepted', 'completed'), d.created_at DESC`,
+        ORDER BY FIELD(d.status, 'waiting', 'accepted', 'review', 'completed', 'suspended'), d.created_at DESC`,
       [project.id],
     );
     const people = await getUsers([
@@ -213,7 +213,7 @@ router.delete(
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     await requireLeader(project, user);
     const [blocking] = await query<{ n: number | string }>(
-      "SELECT COUNT(*) AS n FROM demands WHERE project_id = ? AND status = 'accepted'",
+      "SELECT COUNT(*) AS n FROM demands WHERE project_id = ? AND status IN ('accepted', 'review')",
       [project.id],
     );
     if (Number(blocking?.n ?? 0) > 0) throw conflict('DEMAND_IN_PROGRESS', '项目还有进行中的需求，先完成后再删除');

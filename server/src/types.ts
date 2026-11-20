@@ -5,7 +5,8 @@ export type Role = 'leader' | 'participant';
 export type ApplyType = 'leader' | 'participant';
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type ApplySource = 'web' | 'join';
-export type DemandStatus = 'waiting' | 'accepted' | 'completed';
+export type DemandStatus = 'waiting' | 'accepted' | 'review' | 'completed' | 'suspended';
+export type DemandSuspendFrom = 'waiting' | 'accepted' | 'review';
 export type AuthMethod = 'sso' | 'dev';
 
 /** attachSession 解析出来的会话用户；名字头像来自 UniSSO 目录，取不到时为 null。 */
@@ -99,7 +100,9 @@ export interface DemandRow {
   user_id: string | null;
   created_at: Date;
   accepted_at: Date | null;
+  submitted_at: Date | null;
   completed_at: Date | null;
+  status_before_suspend: DemandSuspendFrom | null;
 }
 
 export interface DemandJoinedRow extends DemandRow {

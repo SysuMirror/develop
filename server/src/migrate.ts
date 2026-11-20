@@ -37,6 +37,20 @@ async function ensureIndex(table: string, index: string, alterStatement: string)
   return true;
 }
 
+// ENUM 补值不能靠 ensureColumn（列已存在），只改列定义；旧库的 waiting/accepted/completed 原样保留。
+async function ensureDemandStatusEnum(): Promise<void> {
+  const [column] = await query<{ column_type: string }>(
+    `SELECT COLUMN_TYPE AS column_type
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'demands' AND COLUMN_NAME = 'status'`,
+  );
+  if (!column || column.column_type.includes('review')) return;
+  await query(
+    "ALTER TABLE demands MODIFY COLUMN status ENUM('waiting','accepted','review','completed','suspended') NOT NULL DEFAULT 'waiting'",
+  );
+  console.log('demands.status -> 5 states');
+}
+
 // 唯一索引建不上去就会一直失败，所以先把历史重复行清掉：同项目同标题只保留 id 最小的一条。
 // 删除前把整行打到日志，方便事后追溯（这类重复多半是旧版 404 bug 带来的重试）。
 async function dedupeDemands(): Promise<void> {
@@ -137,6 +151,14 @@ async function migrate(): Promise<void> {
     "ALTER TABLE sessions ADD COLUMN auth_method VARCHAR(16) NOT NULL DEFAULT 'sso' AFTER user_id",
   );
   await ensureColumn('sessions', 'developer', 'ALTER TABLE sessions ADD COLUMN developer TINYINT(1) NULL AFTER auth_method');
+  // 需求状态机扩到五态：接单人提交后待确认，发布者可挂起与恢复。
+  await ensureColumn('demands', 'submitted_at', 'ALTER TABLE demands ADD COLUMN submitted_at DATETIME NULL AFTER accepted_at');
+  await ensureColumn(
+    'demands',
+    'status_before_suspend',
+    "ALTER TABLE demands ADD COLUMN status_before_suspend ENUM('waiting','accepted','review') NULL AFTER status",
+  );
+  await ensureDemandStatusEnum();
   // 去重必须排在唯一索引之前，否则 ALTER 会因重复键失败。
   await dedupeDemands();
   // 收紧 leader 约束要排在列表查询/索引之前，旧库的 NULL 行必须先清掉。
