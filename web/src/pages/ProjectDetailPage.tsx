@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { ReactNode } from 'react';
 import { api, messageOf } from '../api';
 import { useAuth } from '../auth';
 import { useApi } from '../hooks';
@@ -19,9 +18,15 @@ import {
   displayName,
   useToast,
 } from '../ui';
-import type { ApplyItem, ProjectDemand, ProjectDetail } from '../types';
+import type { ApplyItem, ProjectDetail } from '../types';
 
-type DialogKind = 'apply' | 'edit' | 'demand' | 'quit' | 'delete';
+type DialogKind = 'apply' | 'edit' | 'demand' | 'quit' | 'delete' | 'kick';
+
+interface DialogState {
+  kind: DialogKind;
+  userId?: string;
+  name?: string;
+}
 
 interface EditForm {
   title: string;
@@ -41,7 +46,7 @@ export default function ProjectDetailPage() {
   const project = useApi<ProjectDetail>(`/projects/${id}`);
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<{ kind: DialogKind } | null>(null);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
 
   const data = project.data;
   const applyItems = (inbox.data?.items ?? []).filter((item) => String(item.project.id) === String(id));
@@ -87,36 +92,6 @@ export default function ProjectDetailPage() {
   const isMember = permissions.isMember;
   const canAcceptApply = isLeader;
   const myId = user?.id;
-
-  function renderDemandAction(demand: ProjectDemand): ReactNode {
-    // 项目详情的需求没有 creator 字段（只有 assignee），所以待接单的需求一律给出按钮：
-    // 服务端会拦住自己接自己发布的那种请求。
-    if (demand.status === 'waiting') {
-      return (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={busy}
-          onClick={() => run(() => api.post(`/demands/${demand.id}/accept`), '已接单')}
-        >
-          接单
-        </button>
-      );
-    }
-    if (demand.status === 'accepted' && (demand.assignee?.id === myId || isLeader)) {
-      return (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={busy}
-          onClick={() => run(() => api.post(`/demands/${demand.id}/complete`), '已标记完成')}
-        >
-          标记完成
-        </button>
-      );
-    }
-    return null;
-  }
 
   return (
     <div>
@@ -203,22 +178,13 @@ export default function ProjectDetailPage() {
               </div>
               <StatusBadge map={ROLE} value={member.role} />
               {isLeader && member.userId !== myId ? (
-                <div className="row" style={{ gap: 4 }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => run(() => api.post(`/projects/${id}/transfer`, { userId: member.userId }), '已转让 leader')}
-                  >
-                    转让
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm btn-danger"
-                    onClick={() => run(() => api.del(`/projects/${id}/members/${member.userId}`), '已移出成员')}
-                  >
-                    移出
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm btn-danger"
+                  onClick={() => setDialog({ kind: 'kick', userId: member.userId, name: displayName(member) })}
+                >
+                  移出
+                </button>
               ) : null}
             </div>
           ))}
@@ -291,7 +257,9 @@ export default function ProjectDetailPage() {
 
       <div className="section-head">
         <h2>需求</h2>
-        <span className="faint">{data.demands.length} 条</span>
+        <span className="faint">
+          {data.demands.length} 条 · 接单与标记完成在需求页或需求详情里操作
+        </span>
       </div>
       {data.demands.length === 0 ? (
         <Empty title="还没有需求" hint={isMember ? '用右上角「发布需求」发起第一个任务。' : '成员可以发布需求。'} />
@@ -309,9 +277,7 @@ export default function ProjectDetailPage() {
                     {demand.assignee ? ` · 由 ${displayName(demand.assignee)} 接单` : ' · 等待接单'} · <TimeAgo value={demand.createdAt} />
                   </div>
                 </div>
-                <div className="row" style={{ gap: 6 }}>
-                  {renderDemandAction(demand)}
-                </div>
+
               </div>
             ))}
           </div>
@@ -362,6 +328,17 @@ export default function ProjectDetailPage() {
         }
       />
 
+      <KickMemberDialog
+        open={dialog?.kind === 'kick'}
+        name={dialog?.name ?? ''}
+        busy={busy}
+        onClose={() => setDialog(null)}
+        onConfirm={() => {
+          const userId = dialog?.userId;
+          if (userId) run(() => api.del(`/projects/${id}/members/${userId}`), '已移出成员');
+        }}
+      />
+
       <DeleteProjectDialog
         open={dialog?.kind === 'delete'}
         title={data.title}
@@ -407,6 +384,39 @@ function ApplyDialog({ open, onClose, onSubmit, busy }: ApplyDialogProps) {
       <Field label="留言" hint="写点你能承担的部分，审批会更快。">
         <textarea className="textarea" value={note} onChange={(event) => setNote(event.target.value)} />
       </Field>
+    </Modal>
+  );
+}
+
+interface KickMemberDialogProps {
+  open: boolean;
+  name: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+function KickMemberDialog({ open, name, busy, onClose, onConfirm }: KickMemberDialogProps) {
+  return (
+    <Modal
+      open={open}
+      title="移出成员"
+      sub={`${name || '该成员'} 将立即失去项目成员身份，需要重新申请才能加入。`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="button" className="btn btn-danger" disabled={busy} onClick={onConfirm}>
+            确认移出
+          </button>
+        </>
+      }
+    >
+      <p className="faint" style={{ margin: 0 }}>
+        已接下的需求不会被取消，对方仍可在需求详情里标记完成。
+      </p>
     </Modal>
   );
 }
