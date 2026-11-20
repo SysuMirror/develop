@@ -16,16 +16,20 @@ applies、demands，外加三张辅助表：sessions（登录会话）、user_pr
 
 所有页面除 =/login= 外都要求登录，业务页面还要求开发者资格（服务端拦截，前端显示认证引导页）。
 
-| 页面     | 路由                | 说明                                                                           |
-|----------+---------------------+--------------------------------------------------------------------------------|
-| 概览     | =/=                 | 与我有关 / 与我无关两块：我的待办与项目、最近发生的事                          |
-| 登录     | =/login=            | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                           |
-| 项目列表 | =/projects=         | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页           |
-| 项目详情 | =/projects/:id=     | 说明按 Markdown 渲染；成员、需求、申请箱；leader 可编辑、删除、移除成员        |
-| 需求     | =/demands=          | 五种状态页签与「全部 / 我发布的 / 我接的」视角；列表只读，不内联操作按钮       |
-| 需求详情 | =/demands/:id=      | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、提交、验收、挂起在这里 |
-| 需求编辑 | =/demands/:id/edit= | 独立编辑页：左写 Markdown、右实时预览， =Ctrl/⌘ + Enter= 保存；仅发布者可用    |
-| 我的     | =/me=               | 待我审批、我参与的项目、个人参与的需求                                         |
+| 页面     | 路由                        | 说明                                                                           |
+|----------+-----------------------------+--------------------------------------------------------------------------------|
+| 概览     | =/=                         | 与我有关 / 与我无关两块：我的待办与项目、最近发生的事                          |
+| 登录     | =/login=                    | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                           |
+| 项目列表 | =/projects=                 | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页           |
+| 项目详情 | =/projects/:id=             | 说明按 Markdown 渲染；成员、需求、申请箱；leader 可删除项目、移出成员          |
+| 新建项目 | =/projects/new=             | 名称与 Markdown 说明；创建后成为 leader 并跳到项目页                           |
+| 项目编辑 | =/projects/:id/edit=        | 同新建页字段，初值取接口；仅 leader 可进                                       |
+| 发布需求 | =/projects/:id/demands/new= | 标题与 Markdown 细节；项目成员可用，发布后跳到需求详情                         |
+| 申请加入 | =/projects/:id/apply=       | 一句留言，提交后回项目页等待 leader 审批                                       |
+| 需求     | =/demands=                  | 五种状态页签与「全部 / 我发布的 / 我接的」视角；列表只读，不内联操作按钮       |
+| 需求详情 | =/demands/:id=              | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、提交、验收、挂起在这里 |
+| 需求编辑 | =/demands/:id/edit=         | 独立编辑页：左写 Markdown、右实时预览， =Ctrl/⌘ + Enter= 保存；仅发布者可用    |
+| 我的     | =/me=                       | 待我审批、我参与的项目、个人参与的需求                                         |
 
 概览页只读，全部复用项目、申请、需求的现有列表接口，不新增后端接口。顶部四个数字分别是
 待我审批、进行中的需求、我参与的项目、我负责的项目（我参与含 leader 与成员身份）；下面分「与我有关」（待我审批的申请、我接下的进行中
@@ -606,10 +610,12 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       hooks.ts        # 数据请求 hook
       types.ts        # 接口返回值的类型定义
       ui.tsx          # 表格 / 徽章 / 空态等基础组件
-      markdown.tsx    # 需求正文的 Markdown 渲染（react-markdown + remark-gfm）
+      markdown.tsx    # 正文的 Markdown 渲染（react-markdown + remark-gfm）
+      markdown-editor.tsx # 左写右预览的编辑器，需求 / 项目表单共用
       styles.css      # 全部样式
-      pages/          # Home / Login / Projects / ProjectDetail / Demands /
-                      # DemandDetail / DemandEdit / Profile / NoQualification
+      pages/          # Home / Login / Projects / ProjectDetail / ProjectForm /
+                      # DemandNew / Apply / Demands / DemandDetail / DemandEdit /
+                      # Profile / NoQualification
     vite.config.ts    # 5173 端口与 /api 代理
   static/er-clean.png # ER 图导出
 #+end_src
