@@ -365,6 +365,7 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 | =SESSION_SECRET=                                                           | 生产必填 | 会话 Cookie 签名密钥，换掉即全体掉线，重启不变则会话不丢                 |
 | =SESSION_DAYS=                                                             | 否       | =30=                                                                     |
 | =JOIN_API_KEY=                                                             | 接入时   | 共享密钥；留空时 =/api/join/*= 一律 503                                  |
+| =DEBUG_API=                                                                | 否       | 留空按 =NODE_ENV= 与 =DEV_LOGIN= 推导；设为 =0= 强制关闭接口自检页       |
 
 * 十二、数据模型
 
@@ -523,6 +524,19 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 |------+---------------------+----------------+--------------------------------------|
 | POST | =/api/join/applies= | =JOIN_API_KEY= | join 平台代用户提交 participant 申请 |
 
+** 接口自检页（仅非生产）
+
+=web/src/pages/DebugApiPage.tsx= 提供只读巡检页 =/debug/api= ：把上面这些只读接口逐条发 GET，
+展示状态码、耗时、错误码与响应体，用于排查登录、开发者资格、数据库、SSO 与目录缓存的问题。
+页面使用当前浏览器会话，本身就是一次端到端验证；未登录时页面仍可打开，认证类探针显示 401。
+
+开放规则： =NODE_ENV= 不为 =production= ，或 =DEV_LOGIN= 开启时可用； =DEBUG_API= 设为 =0=
+可强制关闭。不开放时服务端对 =/debug/api= 直接返回 404，导航也不出现入口； =/api/health= 的
+=debug= 字段给出当前开关状态。
+
+边界：只发 GET，不写测试数据； =/api/join/*= 是服务端到服务端接口，需要 =JOIN_API_KEY= ，
+浏览器拿不到，页面只列说明，请用 curl 单独验证。
+
 * 十四、FAQ
 
 - 本地没有 SSO 应用怎么登录？把 =DEV_LOGIN= 设为 =1= ， =/login= 会列出 =demo-users.ts= 里的演示身份。
@@ -570,11 +584,13 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
       api.ts          # fetch 封装与错误码文案
       auth.tsx        # 登录态
       hooks.ts        # 数据请求 hook
+      debug.ts        # 接口自检页开关（读 /api/health 的 debug 字段）
       types.ts        # 接口返回值的类型定义
       ui.tsx          # 表格 / 徽章 / 空态等基础组件
       styles.css      # 全部样式
       pages/          # Home / Login / Projects / ProjectDetail / Users /
-                      # UserDetail / Demands / Profile / NoQualification
+                      # UserDetail / Demands / Profile / NoQualification /
+                      # DebugApi（接口自检）
     vite.config.ts    # 5173 端口与 /api 代理
   static/er-clean.png # ER 图导出
 #+end_src

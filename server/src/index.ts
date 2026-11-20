@@ -21,6 +21,12 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// 接口自检页只在非生产环境开放；DEBUG_API=0 可在任何环境强制关闭。
+export function debugRoutesEnabled(): boolean {
+  if (process.env.DEBUG_API === '0') return false;
+  return process.env.NODE_ENV !== 'production' || process.env.DEV_LOGIN === '1';
+}
+
 export function createApp(): express.Express {
   const app = express();
   app.disable('x-powered-by');
@@ -44,9 +50,15 @@ export function createApp(): express.Express {
           sso: auth.ssoConfigured(),
           devLogin: auth.devLoginEnabled(),
           developerGate: true,
+          debug: debugRoutesEnabled(),
         });
       } catch (error) {
-        res.status(503).json({ ok: false, db: 'down', message: messageOf(error) });
+        res.status(503).json({
+          ok: false,
+          db: 'down',
+          debug: debugRoutesEnabled(),
+          message: messageOf(error),
+        });
       }
     }),
   );
@@ -82,6 +94,11 @@ export function createApp(): express.Express {
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) {
       next();
+      return;
+    }
+    // SPA 路由由浏览器渲染，服务端只负责挡住直达 URL：生产环境不暴露自检页。
+    if (!debugRoutesEnabled() && (req.path === '/debug' || req.path.startsWith('/debug/'))) {
+      res.status(404).type('text/plain').send('Not Found');
       return;
     }
     if (fs.existsSync(indexHtml)) {
