@@ -449,6 +449,7 @@ export const callback = async (req: Request, res: Response): Promise<void> => {
       accessToken: token.access_token as string,
       refreshToken: token.refresh_token || null,
       expiresIn: Number(token.expires_in) || 3600,
+      developer: profile.developer === true,
     });
     res.append('Set-Cookie', sessionCookie(req, session.id, session.expires));
     return redirectSafe(req, res, returnTo);
