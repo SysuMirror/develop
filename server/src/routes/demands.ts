@@ -70,6 +70,14 @@ router.get(
   }),
 );
 
+router.get(
+  '/demands/:id',
+  wrap(async (req, res) => {
+    const demand = await loadJoinedDemand(Number(req.params.id));
+    res.json((await mapDemands([demand]))[0]);
+  }),
+);
+
 router.post(
   '/projects/:id/demands',
   wrap(async (req, res) => {
