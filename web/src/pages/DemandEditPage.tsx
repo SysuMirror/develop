@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, messageOf } from '../api';
 import { useApi } from '../hooks';
-import { MarkdownText } from '../markdown';
+import { MarkdownEditor } from '../markdown-editor';
 import { Field, Skeleton, useToast } from '../ui';
 import type { DemandItem } from '../types';
 
@@ -124,34 +124,13 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
         所属项目：{demand.project.title}
       </div>
 
-      <div className="editor">
-        <div className="editor__pane">
-          <label className="editor__label" htmlFor="demand-detail">
-            内容（Markdown）
-          </label>
-          <textarea
-            id="demand-detail"
-            className="textarea editor__textarea"
-            value={form.detail}
-            spellCheck={false}
-            onChange={(event) => setForm({ ...form, detail: event.target.value })}
-            onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                event.preventDefault();
-                void save();
-              }
-            }}
-            placeholder={'# 背景\n…\n\n# 验收标准\n…'}
-          />
-          <p className="faint">Ctrl / ⌘ + Enter 保存；正文支持 Markdown（代码块、表格、链接）。</p>
-        </div>
-        <div className="editor__pane">
-          <span className="editor__label">预览</span>
-          <div className="panel editor__preview">
-            <MarkdownText source={form.detail} empty="在左侧写点什么，这里会实时渲染。" />
-          </div>
-        </div>
-      </div>
+      <MarkdownEditor
+        id="demand-detail"
+        value={form.detail}
+        onChange={(detail) => setForm({ ...form, detail })}
+        placeholder={'# 背景\n…\n\n# 验收标准\n…'}
+        onSubmitShortcut={() => void save()}
+      />
     </div>
   );
 }
