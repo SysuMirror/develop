@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { loadMembership, loadProject, requireApplyDecider } from '../access.ts';
-import { one, query, withTx } from '../db.ts';
+import { execute, one, query, withTx } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound, wrap } from '../http.ts';
 import { enqueueQualification } from '../qual-sync.ts';
@@ -66,11 +66,11 @@ router.post(
       res.status(201).json({ id: existing.id, status: 'waiting' });
       return;
     }
-    const result = await query<ResultSetHeader>(
+    const result = await execute(
       "INSERT INTO applies (project_id, user_id, type, status, note) VALUES (?, ?, ?, 'waiting', ?)",
       [project.id, user.id, type, note],
     );
-    res.status(201).json({ id: result[0]?.insertId, status: 'waiting' });
+    res.status(201).json({ id: result.insertId, status: 'waiting' });
   }),
 );
 

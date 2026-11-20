@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { loadProject, requireMember } from '../access.ts';
-import { one, query } from '../db.ts';
+import { execute, one, query } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
 import type { DemandJoinedRow, DemandRow, DirectoryUser } from '../types.ts';
@@ -80,11 +80,11 @@ router.post(
     const title = String(req.body?.title ?? '').trim();
     const detail = req.body?.detail == null ? null : String(req.body.detail).trim();
     if (!title || title.length > 200) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 200 字');
-    const inserted = await query<{ insertId: number }>(
+    const inserted = await execute(
       "INSERT INTO demands (project_id, title, detail, created_by, status) VALUES (?, ?, ?, ?, 'waiting')",
       [project.id, title, detail, user.id],
     );
-    const created = await loadJoinedDemand(inserted[0]?.insertId ?? 0);
+    const created = await loadJoinedDemand(inserted.insertId);
     res.status(201).json((await mapDemands([created]))[0]);
   }),
 );
