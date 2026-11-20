@@ -30,7 +30,7 @@ function permissionsOf(viewer: Viewer | null) {
   const isAssignee = viewer.assignee !== null && viewer.id === viewer.assignee;
   return {
     canEdit: viewer.id === viewer.createdBy && EDITABLE.includes(viewer.status),
-    canAccept: viewer.status === 'waiting' && viewer.id !== viewer.createdBy,
+    canAccept: viewer.status === 'waiting',
     canSubmit: viewer.status === 'accepted' && isAssignee,
     canReview: viewer.status === 'review' && isOwner,
     canSuspend: SUSPENDABLE.includes(viewer.status) && isOwner,
@@ -175,7 +175,9 @@ router.patch(
     if (demand.created_by !== user.id) throw forbidden('NOT_CREATOR', '只有发布者可以修改需求');
     if (!EDITABLE.includes(demand.status)) throw conflict('NOT_EDITABLE', '待确认或已完成的需求不能修改');
     const title = String(req.body?.title ?? demand.title).trim();
-    const detail = req.body?.detail === undefined ? demand.detail : req.body.detail === null ? null : String(req.body.detail).trim();
+    let detail = demand.detail;
+    if (req.body?.detail === null) detail = null;
+    else if (req.body?.detail !== undefined) detail = String(req.body.detail).trim();
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
     const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ? AND id <> ?', [
       demand.project_id,
@@ -201,7 +203,6 @@ router.post(
     const demand = await one<DemandRow>('SELECT * FROM demands WHERE id = ?', [Number(req.params.id)]);
     if (!demand) throw notFound('需求不存在');
     if (demand.status !== 'waiting') throw conflict('NOT_PENDING', '该需求已被接单或已完成');
-    if (demand.created_by === user.id) throw forbidden('SELF_ACCEPT', '不能接自己发布的需求');
     await query(
       "UPDATE demands SET status = 'accepted', user_id = ?, accepted_at = NOW() WHERE id = ? AND status = 'waiting'",
       [user.id, demand.id],
