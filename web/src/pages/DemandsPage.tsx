@@ -47,41 +47,63 @@ export default function DemandsPage() {
     content = <Empty title="没有匹配的需求" hint="需求由项目成员发布，换个状态筛选看看。" />;
   } else {
     content = (
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>需求</th>
-              <th>项目</th>
-              <th>发布者</th>
-              <th>接单人</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((demand) => (
-              <tr key={demand.id}>
-                <td>
-                  <Link className="cell-title" to={`/demands/${demand.id}`}>
-                    {demand.title}
-                  </Link>
-                </td>
-                <td>
-                  <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
-                </td>
-                <td>{demand.creator?.name || <span className="faint">—</span>}</td>
-                <td>{demand.assignee ? displayName(demand.assignee) : <span className="faint">—</span>}</td>
-                <td>
-                  <StatusBadge map={DEMAND_STATUS} value={demand.status} />
-                  <div className="faint">
-                    <TimeAgo value={demand.createdAt} />
-                  </div>
-                </td>
+      <>
+        <div className="table-wrap only-desktop">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>需求</th>
+                <th>项目</th>
+                <th>发布者</th>
+                <th>接单人</th>
+                <th>状态</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {items.map((demand) => (
+                <tr key={demand.id}>
+                  <td>
+                    <Link className="cell-title" to={`/demands/${demand.id}`}>
+                      {demand.title}
+                    </Link>
+                  </td>
+                  <td>
+                    <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
+                  </td>
+                  <td>{demand.creator?.name || <span className="faint">—</span>}</td>
+                  <td>{demand.assignee ? displayName(demand.assignee) : <span className="faint">—</span>}</td>
+                  <td>
+                    <StatusBadge map={DEMAND_STATUS} value={demand.status} />
+                    <div className="faint">
+                      <TimeAgo value={demand.createdAt} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ul className="card-list only-mobile">
+          {items.map((demand) => (
+            <li key={demand.id}>
+              <Link className="list-card" to={`/demands/${demand.id}`}>
+                <div className="list-card__top">
+                  <span className="list-card__title">{demand.title}</span>
+                  <StatusBadge map={DEMAND_STATUS} value={demand.status} />
+                </div>
+                <div className="list-card__meta">
+                  <span>{demand.project.title}</span>
+                  <span>发布者 {demand.creator?.name || '—'}</span>
+                  <span>{demand.assignee ? `接单 ${displayName(demand.assignee)}` : '待认领'}</span>
+                  <span>
+                    <TimeAgo value={demand.createdAt} />
+                  </span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </>
     );
   }
 

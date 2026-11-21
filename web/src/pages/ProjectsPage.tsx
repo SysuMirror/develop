@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { qs } from '../api';
 import { useApi, useDebounced } from '../hooks';
@@ -44,45 +44,70 @@ export default function ProjectsPage() {
     content = <Empty title="没有匹配的项目" hint="换个筛选条件，或者自己建一个。" />;
   } else {
     content = (
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>项目</th>
-              <th>Leader</th>
-              <th className="right">成员</th>
-              <th className="right">待接需求</th>
-              <th>我的状态</th>
-              <th className="right">更新</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((project) => (
-              <tr key={project.id} onClick={() => navigate(`/projects/${project.id}`)} style={{ cursor: 'pointer' }}>
-                <td>
-                  <div className="cell-title">{project.title}</div>
-                  <div className="faint truncate" style={{ maxWidth: 420 }}>
-                    {project.misc || '暂无说明'}
-                  </div>
-                </td>
-                <td>{project.leader ? project.leader.name : <span className="faint">—</span>}</td>
-                <td className="right">{project.memberCount}</td>
-                <td className="right">
-                  {project.waitingDemandCount > 0 ? (
-                    <Badge tone="amber">{project.waitingDemandCount}</Badge>
-                  ) : (
-                    <span className="faint">0</span>
-                  )}
-                </td>
-                <td>{statusCell(project)}</td>
-                <td className="right">
-                  <TimeAgo value={project.updatedAt} />
-                </td>
+      <>
+        <div className="table-wrap only-desktop">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>项目</th>
+                <th>Leader</th>
+                <th className="right">成员</th>
+                <th className="right">待接需求</th>
+                <th>我的状态</th>
+                <th className="right">更新</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {items.map((project) => (
+                <tr key={project.id} onClick={() => navigate(`/projects/${project.id}`)} style={{ cursor: 'pointer' }}>
+                  <td>
+                    <div className="cell-title">{project.title}</div>
+                    <div className="faint truncate" style={{ maxWidth: 420 }}>
+                      {project.misc || '暂无说明'}
+                    </div>
+                  </td>
+                  <td>{project.leader ? project.leader.name : <span className="faint">—</span>}</td>
+                  <td className="right">{project.memberCount}</td>
+                  <td className="right">
+                    {project.waitingDemandCount > 0 ? (
+                      <Badge tone="amber">{project.waitingDemandCount}</Badge>
+                    ) : (
+                      <span className="faint">0</span>
+                    )}
+                  </td>
+                  <td>{statusCell(project)}</td>
+                  <td className="right">
+                    <TimeAgo value={project.updatedAt} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ul className="card-list only-mobile">
+          {items.map((project) => (
+            <li key={project.id}>
+              <Link className="list-card" to={`/projects/${project.id}`}>
+                <div className="list-card__top">
+                  <span className="list-card__title">{project.title}</span>
+                  {statusCell(project)}
+                </div>
+                {project.misc ? <p className="list-card__desc">{project.misc}</p> : null}
+                <div className="list-card__meta">
+                  <span>Leader {project.leader ? project.leader.name : '—'}</span>
+                  <span>{project.memberCount} 位成员</span>
+                  <span>
+                    {project.waitingDemandCount > 0 ? `${project.waitingDemandCount} 个待接需求` : '暂无待接需求'}
+                  </span>
+                  <span>
+                    <TimeAgo value={project.updatedAt} />
+                  </span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </>
     );
   }
 
