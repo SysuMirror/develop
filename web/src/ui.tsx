@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatTime } from './api';
 import type { ApplyStatus, ApplyType, DemandStatus, Role } from './types';
@@ -106,11 +106,20 @@ interface ModalProps {
 }
 
 export function Modal({ open, title, sub, onClose, children, footer, wide }: ModalProps) {
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   if (!open) return null;
   return (
     <div
       className="modal-backdrop"
-      onMouseDown={(event) => {
+      onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >

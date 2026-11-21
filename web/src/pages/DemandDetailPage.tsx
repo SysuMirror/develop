@@ -55,7 +55,7 @@ export default function DemandDetailPage() {
             ) : null}
           </div>
         </div>
-        <div className="row">
+        <div className="row page-actions">
           <DemandActions
             demand={demand}
             onChanged={reload}

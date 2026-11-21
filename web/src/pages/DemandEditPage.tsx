@@ -94,7 +94,7 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
           <h1 className="page-title">编辑需求</h1>
           <p className="page-sub">左侧写 Markdown，右侧实时预览；开始验收之后需求会锁定，不能再改。</p>
         </div>
-        <div className="row">
+        <div className="row page-actions">
           <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
             取消
           </button>

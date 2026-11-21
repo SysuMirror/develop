@@ -100,7 +100,7 @@ export default function ProjectDetailPage() {
             {data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : null}
           </div>
         </div>
-        <div className="row">
+        <div className="row page-actions">
           {permissions.canApply ? (
             <button type="button" className="btn btn-primary" onClick={() => navigate(`/projects/${id}/apply`)}>
               申请加入
@@ -230,7 +230,7 @@ export default function ProjectDetailPage() {
                         ) : null}
                       </div>
                     </div>
-                    <div className="row" style={{ gap: 6 }}>
+                    <div className="row list__row__actions" style={{ gap: 6 }}>
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"

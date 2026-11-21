@@ -92,7 +92,7 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
           <h1 className="page-title">发布需求</h1>
           <p className="page-sub">需求对平台上的所有用户开放，接单后即可开始；同项目内标题不能重复。</p>
         </div>
-        <div className="row">
+        <div className="row page-actions">
           <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
             取消
           </button>

@@ -56,7 +56,7 @@ function ProjectCreateForm() {
           <h1 className="page-title">新建项目</h1>
           <p className="page-sub">创建后你将成为该项目的 leader，可以审批成员申请并发布需求。</p>
         </div>
-        <div className="row">
+        <div className="row page-actions">
           <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
             取消
           </button>
@@ -160,7 +160,7 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
           <h1 className="page-title">编辑项目</h1>
           <p className="page-sub">左侧写 Markdown，右侧实时预览；列表里只显示纯文本摘要。</p>
         </div>
-        <div className="row">
+        <div className="row page-actions">
           <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
             取消
           </button>
