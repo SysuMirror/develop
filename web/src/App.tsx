@@ -21,12 +21,76 @@ interface NavItem {
   end?: boolean;
 }
 
+type TabIconName = 'home' | 'projects' | 'demands' | 'me';
+
+interface TabItem extends NavItem {
+  icon: TabIconName;
+}
+
 const NAV: NavItem[] = [
   { to: '/', label: '概览', end: true },
   { to: '/projects', label: '项目' },
   { to: '/demands', label: '需求' },
   { to: '/me', label: '我的' },
 ];
+
+const TAB_NAV: TabItem[] = [
+  { to: '/', label: '概览', end: true, icon: 'home' },
+  { to: '/projects', label: '项目', icon: 'projects' },
+  { to: '/demands', label: '需求', icon: 'demands' },
+  { to: '/me', label: '我的', icon: 'me' },
+];
+
+function TabIcon({ name }: { name: TabIconName }) {
+  if (name === 'home') {
+    return (
+      <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 10.5 12 4l8 6.5" />
+        <path d="M6 9.5V20h12V9.5" />
+      </svg>
+    );
+  }
+  if (name === 'projects') {
+    return (
+      <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="4" y="4" width="7" height="7" rx="1.5" />
+        <rect x="13" y="4" width="7" height="7" rx="1.5" />
+        <rect x="4" y="13" width="7" height="7" rx="1.5" />
+        <rect x="13" y="13" width="7" height="7" rx="1.5" />
+      </svg>
+    );
+  }
+  if (name === 'demands') {
+    return (
+      <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M9 6h11M9 12h11M9 18h11" />
+        <path d="M4.5 5.5 5.5 6.5 7.5 4.5M4.5 11.5 5.5 12.5 7.5 10.5M4.5 17.5 5.5 18.5 7.5 16.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c1.2-3.2 3.8-5 7-5s5.8 1.8 7 5" />
+    </svg>
+  );
+}
+
+function MobileTabBar() {
+  const { user } = useAuth();
+  const location = useLocation();
+  if (!user || location.pathname === '/login') return null;
+  return (
+    <nav className="tabbar" aria-label="主导航">
+      {TAB_NAV.map((item) => (
+        <NavLink key={item.to} to={item.to} end={item.end} className="tabbar__item">
+          <TabIcon name={item.icon} />
+          <span>{item.label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
 
 function Header() {
   const { user, logout } = useAuth();
@@ -48,9 +112,9 @@ function Header() {
           <div className="row" style={{ gap: 6 }}>
             <Link className="user-chip" to="/me">
               <Avatar name={displayName(user)} src={user.avatar} />
-              {displayName(user)}
+              <span className="user-chip__name">{displayName(user)}</span>
             </Link>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => logout()}>
+            <button type="button" className="btn btn-ghost btn-sm header-logout" onClick={() => logout()}>
               退出
             </button>
           </div>
@@ -83,6 +147,7 @@ function Layout() {
         <Outlet />
       </main>
       <Footer />
+      <MobileTabBar />
     </>
   );
 }

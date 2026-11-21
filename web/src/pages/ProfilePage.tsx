@@ -46,7 +46,7 @@ function DemandRow({ demand }: { demand: DemandItem }) {
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { push } = useToast();
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const projects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'all', pageSize: 50 })}`);
@@ -119,7 +119,7 @@ export default function ProfilePage() {
                   ) : null}
                 </div>
               </div>
-              <div className="row" style={{ gap: 6 }}>
+              <div className="row list__row__actions" style={{ gap: 6 }}>
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
@@ -205,6 +205,9 @@ export default function ProfilePage() {
             <div style={{ fontWeight: 700 }}>{displayName(user)}</div>
             <div className="faint">{user?.email || '未提供邮箱'}</div>
           </div>
+          <button type="button" className="btn btn-secondary btn-sm logout-mobile" onClick={() => logout()}>
+            退出登录
+          </button>
         </div>
       </div>
 
