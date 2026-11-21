@@ -1,5 +1,6 @@
-import { NavLink, Outlet, Route, Routes, Link, Navigate, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { NavLink, Outlet, Route, Routes, Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './auth';
 import { Avatar, Skeleton, displayName } from './ui';
 import HomePage from './pages/HomePage';
@@ -21,10 +22,10 @@ interface NavItem {
   end?: boolean;
 }
 
-type TabIconName = 'home' | 'projects' | 'demands' | 'me';
+type NavIconName = 'home' | 'projects' | 'demands' | 'me';
 
-interface TabItem extends NavItem {
-  icon: TabIconName;
+interface MobileNavItem extends NavItem {
+  icon: NavIconName;
 }
 
 const NAV: NavItem[] = [
@@ -34,17 +35,17 @@ const NAV: NavItem[] = [
   { to: '/me', label: '我的' },
 ];
 
-const TAB_NAV: TabItem[] = [
+const MOBILE_NAV: MobileNavItem[] = [
   { to: '/', label: '概览', end: true, icon: 'home' },
   { to: '/projects', label: '项目', icon: 'projects' },
   { to: '/demands', label: '需求', icon: 'demands' },
   { to: '/me', label: '我的', icon: 'me' },
 ];
 
-function TabIcon({ name }: { name: TabIconName }) {
+function NavIcon({ name }: { name: NavIconName }) {
   if (name === 'home') {
     return (
-      <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg className="mobile-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 10.5 12 4l8 6.5" />
         <path d="M6 9.5V20h12V9.5" />
       </svg>
@@ -52,7 +53,7 @@ function TabIcon({ name }: { name: TabIconName }) {
   }
   if (name === 'projects') {
     return (
-      <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg className="mobile-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="4" y="4" width="7" height="7" rx="1.5" />
         <rect x="13" y="4" width="7" height="7" rx="1.5" />
         <rect x="4" y="13" width="7" height="7" rx="1.5" />
@@ -62,33 +63,91 @@ function TabIcon({ name }: { name: TabIconName }) {
   }
   if (name === 'demands') {
     return (
-      <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg className="mobile-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M9 6h11M9 12h11M9 18h11" />
         <path d="M4.5 5.5 5.5 6.5 7.5 4.5M4.5 11.5 5.5 12.5 7.5 10.5M4.5 17.5 5.5 18.5 7.5 16.5" />
       </svg>
     );
   }
   return (
-    <svg className="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="mobile-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 20c1.2-3.2 3.8-5 7-5s5.8 1.8 7 5" />
     </svg>
   );
 }
 
-function MobileTabBar() {
+function MiscIcon() {
+  return (
+    <svg className="mobile-nav__icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="6" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="18" cy="12" r="1.6" />
+    </svg>
+  );
+}
+
+function MobileNav() {
   const { user } = useAuth();
   const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      btnRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
   if (!user || location.pathname === '/login') return null;
+
   return (
-    <nav className="tabbar" aria-label="主导航">
-      {TAB_NAV.map((item) => (
-        <NavLink key={item.to} to={item.to} end={item.end} className="tabbar__item">
-          <TabIcon name={item.icon} />
-          <span>{item.label}</span>
-        </NavLink>
-      ))}
-    </nav>
+    <div className="mobile-nav" ref={wrapRef}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="mobile-nav__btn"
+        aria-label="导航菜单"
+        aria-expanded={open}
+        aria-controls="mobile-nav"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <MiscIcon />
+      </button>
+      {open && (
+        <nav className="mobile-menu" id="mobile-nav" aria-label="主导航">
+          {MOBILE_NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className="mobile-menu__item"
+              onClick={() => setOpen(false)}
+            >
+              <NavIcon name={item.icon} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      )}
+    </div>
   );
 }
 
@@ -114,6 +173,7 @@ function Header() {
               <Avatar name={displayName(user)} src={user.avatar} />
               <span className="user-chip__name">{displayName(user)}</span>
             </Link>
+            <MobileNav />
             <button type="button" className="btn btn-ghost btn-sm header-logout" onClick={() => logout()}>
               退出
             </button>
@@ -147,7 +207,6 @@ function Layout() {
         <Outlet />
       </main>
       <Footer />
-      <MobileTabBar />
     </>
   );
 }
