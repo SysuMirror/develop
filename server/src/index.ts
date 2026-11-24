@@ -54,12 +54,10 @@ export function createApp(): express.Express {
     }),
   );
 
-  // 跳转授权入口（GET）；external 应用不支持邮箱密码登录，故没有 POST 版本。
+  // 登录：邮箱密码走 UniSSO M2M 校验；已登录其它平台时靠共享 Cookie 静默进站。
   app.get('/api/auth/login', wrap(auth.login));
-  app.all('/api/auth/login', (_req, res) => {
-    res.status(405).json({ error: { code: 'METHOD_NOT_ALLOWED', message: '登录只支持 GET 跳转授权' } });
-  });
-  app.get('/api/auth/callback', wrap(auth.callback));
+  app.post('/api/auth/login', wrap(auth.passwordLogin));
+  app.post('/api/auth/sso/try', wrap(auth.ssoTry));
   app.get('/api/auth/me', wrap(auth.me));
   app.post('/api/auth/logout', wrap(auth.logout));
   app.get('/api/auth/dev/identities', wrap(auth.devIdentities));

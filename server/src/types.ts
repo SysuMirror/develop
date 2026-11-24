@@ -18,6 +18,8 @@ export interface SessionUser {
   sessionId: string;
   authMethod: AuthMethod;
   developer: boolean | null;
+  /** 共享 Cookie 里的 UniSSO 会话 id；开发登录的会话为 null。 */
+  ssoSession: string | null;
   accessToken: string | null;
   refreshToken: string | null;
   accessTokenExpiresAt: Date | string | null;
@@ -128,6 +130,7 @@ export interface SessionRow {
   user_id: string;
   auth_method: AuthMethod | null;
   developer: number | boolean | null;
+  sso_session: string | null;
   expires_at: Date;
   access_token: string | null;
   refresh_token: string | null;

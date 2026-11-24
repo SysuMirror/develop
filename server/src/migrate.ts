@@ -151,6 +151,8 @@ async function migrate(): Promise<void> {
     "ALTER TABLE sessions ADD COLUMN auth_method VARCHAR(16) NOT NULL DEFAULT 'sso' AFTER user_id",
   );
   await ensureColumn('sessions', 'developer', 'ALTER TABLE sessions ADD COLUMN developer TINYINT(1) NULL AFTER auth_method');
+  // 无感登录：保存共享 Cookie 里的 UniSSO 会话 id，用于资格校验与单点登出。
+  await ensureColumn('sessions', 'sso_session', 'ALTER TABLE sessions ADD COLUMN sso_session VARCHAR(128) NULL AFTER developer');
   // 需求状态机扩到五态：接单人提交后待确认，发布者可挂起与恢复。
   await ensureColumn('demands', 'submitted_at', 'ALTER TABLE demands ADD COLUMN submitted_at DATETIME NULL AFTER accepted_at');
   await ensureColumn(

@@ -3,28 +3,18 @@ import type { NextFunction, Request, Response } from 'express';
 import { one, query } from './db.ts';
 import { DEMO_USERS } from './demo-users.ts';
 import { getUser, remember } from './directory.ts';
-import { devLoginEnabled, ssoConfigured, ssoCredentials } from './sso-config.ts';
-import {
-  ApiError,
-  badRequest,
-  clearCookieHeader,
-  cookieHeader,
-  forbidden,
-  openCookieValue,
-  redirectSafe,
-  sealCookieValue,
-  safeReturnPath,
-  unauthorized,
-} from './http.ts';
-import type { AuthMethod, SessionRow, SessionUser } from './types.ts';
+import { devLoginEnabled, ssoConfigured } from './sso-config.ts';
+import { passwordVerify, sessionRevoke, sessionVerify } from './unisso-sso.ts';
+import type { SsoUser } from './unisso-sso.ts';
+import { ApiError, badRequest, clearCookieHeader, cookieHeader, forbidden, safeReturnPath, unauthorized } from './http.ts';
+import type { SessionRow, SessionUser } from './types.ts';
 
-const { issuer: ISSUER, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET } = ssoCredentials();
-const SCOPE = process.env.SSO_SCOPE || 'openid profile:username profile:name profile:avatar email';
+// 登录方式：邮箱密码（UniSSO M2M 校验）+ 共享 Cookie 静默登录。没有跳转、没有同意页。
+
 const SESSION_COOKIE = 'sid';
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
-const TX_COOKIE = 'oauth_tx';
-const TX_MAX_AGE = 600; // 授权跳转事务 cookie 有效期（秒）
-const REFRESH_MARGIN_MS = 120_000; // access token 剩余寿命低于此值就先续期
+const SSO_COOKIE_NAMES = ['unisso_sid', 'sse_sso'];
+const SSO_COOKIE_DOMAIN = process.env.SSO_COOKIE_DOMAIN || '.ssemarket.cn';
 
 export { devLoginEnabled, ssoConfigured };
 
@@ -33,8 +23,7 @@ interface QualificationCacheEntry {
   expiresAt: number;
 }
 
-// 资格校验缓存：同一 session 在 TTL 内不重复请求 userinfo，撤销延迟上限即该 TTL。
-// TTL 为 0 表示每次请求都校验。
+// 资格校验缓存：同一 session 在 TTL 内不重复打 UniSSO；撤销延迟上限即该 TTL。
 const qualificationCache = new Map<string, QualificationCacheEntry>();
 const qualificationInFlight = new Map<string, Promise<boolean>>();
 
@@ -59,12 +48,6 @@ function pruneQualificationCache(): void {
 
 const b64url = (buf: Buffer): string => buf.toString('base64url');
 
-function redirectUri(req: Request): string {
-  if (process.env.SSO_REDIRECT_URI) return process.env.SSO_REDIRECT_URI;
-  const proto = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
-  return `${proto}://${req.get('host')}/api/auth/callback`;
-}
-
 function isSecure(req: Request): boolean {
   return (req.get('x-forwarded-proto') || req.protocol) === 'https';
 }
@@ -73,31 +56,11 @@ function toMysqlDate(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-/** UniSSO userinfo（含 users/list 的一条）里我们用到的字段。 */
-interface UserinfoProfile {
-  sub?: unknown;
-  sso_sub?: unknown;
-  preferred_username?: unknown;
-  name?: unknown;
-  picture?: unknown;
-  email?: unknown;
-  developer?: unknown;
-}
-
-interface TokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number | string;
-  error?: string;
-  error_description?: string;
-}
-
 export interface CreateSessionOptions {
-  accessToken?: string | null;
-  refreshToken?: string | null;
-  expiresIn?: number;
-  authMethod?: AuthMethod;
+  authMethod?: 'sso' | 'dev';
   developer?: boolean | null;
+  /** 共享 Cookie 里的 UniSSO 会话 id；静默登录时保存，后续资格校验与单点登出用。 */
+  ssoSession?: string | null;
 }
 
 export interface CreatedSession {
@@ -106,27 +69,16 @@ export interface CreatedSession {
 }
 
 // 会话只记 sub（= UniSSO users.id）；昵称头像不落库，展示时再向目录要。
-// auth_method 区分 sso / dev；access_token 只有 1 小时，过期前用 refresh_token 续。
 export async function createSession(
   userId: string,
-  { accessToken = null, refreshToken = null, expiresIn = 0, authMethod = 'sso', developer = null }: CreateSessionOptions = {},
+  { authMethod = 'sso', developer = null, ssoSession = null }: CreateSessionOptions = {},
 ): Promise<CreatedSession> {
   const id = b64url(crypto.randomBytes(32));
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
-  const tokenExpiresAt = accessToken && expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null;
   await query(
-    `INSERT INTO sessions (id, user_id, auth_method, developer, access_token, refresh_token, access_token_expires_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      userId,
-      authMethod,
-      developer === null ? null : developer ? 1 : 0,
-      accessToken,
-      refreshToken,
-      tokenExpiresAt ? toMysqlDate(tokenExpiresAt) : null,
-      toMysqlDate(expires),
-    ],
+    `INSERT INTO sessions (id, user_id, auth_method, developer, sso_session, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, userId, authMethod, developer === null ? null : developer ? 1 : 0, ssoSession, toMysqlDate(expires)],
   );
   return { id, expires };
 }
@@ -148,6 +100,41 @@ export function clearSessionCookie(): string {
   return clearCookieHeader(SESSION_COOKIE);
 }
 
+/** 把 UniSSO 返回的父域会话原样种给浏览器；没有返回值（开发登录）时跳过。 */
+function plantSsoCookie(
+  res: Response,
+  session: string | null,
+  meta: { name?: string | null; domain?: string | null; maxAge?: number | null } = {},
+): void {
+  if (!session) return;
+  const name = meta.name || SSO_COOKIE_NAMES[0];
+  const domain = meta.domain || SSO_COOKIE_DOMAIN;
+  const maxAge = meta.maxAge && meta.maxAge > 0 ? meta.maxAge : 604800;
+  res.append(
+    'Set-Cookie',
+    `${name}=${session}; Domain=${domain}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+  );
+}
+
+function clearSsoCookies(res: Response, extraName?: string | null): void {
+  const names = new Set<string>(SSO_COOKIE_NAMES);
+  if (extraName) names.add(extraName);
+  for (const name of names) {
+    res.append(
+      'Set-Cookie',
+      `${name}=; Domain=${SSO_COOKIE_DOMAIN}; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`,
+    );
+  }
+}
+
+function readSsoCookie(req: Request): { name: string; value: string } | null {
+  for (const name of SSO_COOKIE_NAMES) {
+    const value = String(req.cookies?.[name] || '').trim();
+    if (value) return { name, value };
+  }
+  return null;
+}
+
 export const attachSession = (req: Request, _res: Response, next: NextFunction): void => {
   const raw = req.cookies?.[SESSION_COOKIE];
   if (!raw) {
@@ -155,7 +142,7 @@ export const attachSession = (req: Request, _res: Response, next: NextFunction):
     return next();
   }
   one<SessionRow>(
-    `SELECT id AS session_id, user_id, auth_method, developer, expires_at, access_token, refresh_token, access_token_expires_at
+    `SELECT id AS session_id, user_id, auth_method, developer, sso_session, expires_at
        FROM sessions
       WHERE id = ? AND expires_at > NOW()`,
     [raw],
@@ -175,9 +162,7 @@ export const attachSession = (req: Request, _res: Response, next: NextFunction):
         sessionId: row.session_id,
         authMethod: row.auth_method || 'sso',
         developer: row.developer === null || row.developer === undefined ? null : Boolean(row.developer),
-        accessToken: row.access_token || null,
-        refreshToken: row.refresh_token || null,
-        accessTokenExpiresAt: row.access_token_expires_at || null,
+        ssoSession: row.sso_session || null,
       };
     })
     .then(() => next())
@@ -189,162 +174,168 @@ export const requireUser = (req: Request, _res: Response, next: NextFunction): v
   else next(unauthorized());
 };
 
+function rememberFromSso(u: SsoUser | null): Promise<void> {
+  const sub = String(u?.sub || u?.sso_sub || '');
+  if (!sub) return Promise.resolve();
+  return remember({
+    sub,
+    preferred_username: u?.preferred_username,
+    name: u?.name,
+    picture: u?.picture,
+    email: u?.email,
+    developer: u?.developer === true,
+  });
+}
+
+/**
+ * 跳转式授权已废弃：老书签/旧链接一律回登录页，由邮箱密码或静默 SSO 接手。
+ */
 export const login = (req: Request, res: Response): void => {
   const returnTo = safeReturnPath(req.query.redirect, '/');
-  if (!ssoConfigured()) {
-    if (devLoginEnabled()) {
-      redirectSafe(req, res, `/login?redirect=${encodeURIComponent(returnTo)}`);
-      return;
-    }
-    throw new ApiError(503, 'SSO_NOT_CONFIGURED', '未配置 UniSSO 凭证，且开发登录已关闭');
-  }
-  const verifier = b64url(crypto.randomBytes(32));
-  const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
-  const state = b64url(crypto.randomBytes(16));
-  const uri = redirectUri(req);
-  const params = new URLSearchParams({
-    client_id: CLIENT_ID,
-    redirect_uri: uri,
-    response_type: 'code',
-    scope: SCOPE,
-    state,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-  });
-  res.setHeader(
-    'Set-Cookie',
-    cookieHeader(TX_COOKIE, sealCookieValue({ state, verifier, returnTo, uri }), {
-      maxAge: TX_MAX_AGE,
-      path: '/api/auth',
-      secure: isSecure(req),
-    }),
-  );
-  redirectSafe(req, res, `${ISSUER}/authorize?${params.toString()}`, { allowedOrigins: [ISSUER] });
+  res.setHeader('Location', `/login?redirect=${encodeURIComponent(returnTo)}`);
+  res.statusCode = 302;
+  res.end();
 };
 
-async function exchangeCode(code: string, verifier: string, uri: string): Promise<TokenResponse> {
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: uri,
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    code_verifier: verifier,
-  });
-  const resp = await fetch(`${ISSUER}/api/oauth/token`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-    body,
-  });
-  const data = (await resp.json().catch(() => ({}))) as TokenResponse;
-  if (!resp.ok || !data.access_token) {
-    const code = String(data.error || '');
-    // 规范错误表：code 一次性，复用/过期都是 invalid_grant；凭证不对是 401 invalid_client。
-    if (code === 'invalid_grant') {
-      throw new ApiError(400, 'SSO_CODE_INVALID', '授权码已失效，请重新登录');
-    }
-    if (resp.status === 401 || code === 'invalid_client') {
-      console.error('[auth] token 端点拒绝了本应用的客户端凭证：', code, data.error_description || '');
-      throw new ApiError(502, 'SSO_CLIENT_REJECTED', '身份服务未接受本应用凭证');
-    }
-    throw new ApiError(502, 'SSO_TOKEN_FAILED', data.error_description || code || '换取 token 失败');
-  }
-  return data;
-}
+/** 邮箱 + 密码：服务端调 UniSSO M2M 校验，Cookie 让用户本人无感。 */
+export const passwordLogin = async (req: Request, res: Response): Promise<void> => {
+  if (!ssoConfigured()) throw new ApiError(503, 'SSO_NOT_CONFIGURED', '未配置统一身份凭证');
+  const email = String(req.body?.email ?? '').trim().toLowerCase();
+  const password = String(req.body?.password ?? '');
+  if (!email || !password) throw badRequest('BAD_REQUEST', '请输入邮箱和密码');
 
-/** refresh_token 换新 access token；expiresIn 缺省按 3600 处理。 */
-async function requestRefreshToken(refreshToken: string): Promise<{
-  accessToken: string;
-  refreshToken: string | null;
-  expiresIn: number;
-}> {
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-  });
-  let resp: globalThis.Response;
+  let result;
   try {
-    resp = await fetch(`${ISSUER}/api/oauth/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch (error) {
-    console.error('[auth] refresh_token 请求失败：', error instanceof Error ? error.message : String(error));
+    result = await passwordVerify(email, password);
+  } catch {
     throw new ApiError(503, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
   }
-  const data = (await resp.json().catch(() => ({}))) as TokenResponse;
-  if (resp.status === 401 || String(data.error || '') === 'invalid_grant') {
-    throw new ApiError(401, 'SSO_SESSION_EXPIRED', '登录已过期，请重新登录');
+  if (result.status === 401) throw new ApiError(401, 'INVALID_CREDENTIALS', '邮箱或密码错误');
+  if (result.status === 403) {
+    throw new ApiError(403, 'SSO_FORBIDDEN', '统一身份未对本应用开启无感登录，请联系管理员');
   }
-  if (!resp.ok || !data.access_token) {
-    console.error('[auth] refresh_token 被拒：', resp.status, String(data.error || ''), data.error_description || '');
+  if (result.status === 429) throw new ApiError(429, 'TOO_MANY_ATTEMPTS', '尝试过于频繁，15 分钟后再试');
+  if (!result.ok || !result.user) {
+    throw new ApiError(502, 'SSO_UNAVAILABLE', result.message || '身份服务暂时不可用，请稍后重试');
+  }
+
+  const sub = String(result.user.sub || result.user.sso_sub || '');
+  if (!sub) throw new ApiError(502, 'SSO_BAD_PROFILE', '统一身份未返回用户标识');
+  await rememberFromSso(result.user);
+  const session = await createSession(sub, {
+    developer: result.user.developer === true,
+    ssoSession: result.ssoSession,
+  });
+  res.append('Set-Cookie', sessionCookie(req, session.id, session.expires));
+  plantSsoCookie(res, result.ssoSession, {
+    name: result.cookieName,
+    domain: result.cookieDomain,
+    maxAge: result.maxAge,
+  });
+  res.json({ ok: true, developer: result.user.developer === true });
+};
+
+// 静默探测限流：同一 IP 每分钟 10 次（每次页面加载都会打一次）。
+const ssoProbeBuckets = new Map<string, number[]>();
+
+function allowSsoProbe(ip: string): boolean {
+  const now = Date.now();
+  const recent = (ssoProbeBuckets.get(ip) || []).filter((at) => now - at < 60_000);
+  if (recent.length >= 10) return false;
+  recent.push(now);
+  ssoProbeBuckets.set(ip, recent);
+  return true;
+}
+
+/**
+ * 静默 SSO：浏览器带着 .ssemarket.cn 下的共享 Cookie 来，后端向 UniSSO 换身份。
+ * 用户在任一平台登录过，这里就直接进站，不再要求输入密码。
+ */
+export const ssoTry = async (req: Request, res: Response): Promise<void> => {
+  if (!ssoConfigured()) throw new ApiError(503, 'SSO_NOT_CONFIGURED', '未配置统一身份凭证');
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  if (!allowSsoProbe(ip)) throw new ApiError(429, 'TOO_MANY_ATTEMPTS', '尝试过于频繁，请稍后再试');
+
+  const cookie = readSsoCookie(req);
+  if (!cookie) throw new ApiError(401, 'NO_SSO', '没有统一登录会话');
+
+  let result;
+  try {
+    result = await sessionVerify(cookie.value);
+  } catch {
+    // UniSSO 不可达：不当作登录失效，前端保留本地会话。
     throw new ApiError(503, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
   }
-  const expiresIn = Number(data.expires_in);
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token || null,
-    expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600,
-  };
-}
-
-/** 用 refresh_token 续期并把新 token 写回会话（refresh_token 可能轮换）。 */
-async function renewAccessToken(user: SessionUser): Promise<string> {
-  if (!user.refreshToken) throw new ApiError(401, 'SSO_SESSION_EXPIRED', '登录已过期，请重新登录');
-  const renewed = await requestRefreshToken(user.refreshToken);
-  const expiresAt = new Date(Date.now() + renewed.expiresIn * 1000);
-  user.accessToken = renewed.accessToken;
-  user.refreshToken = renewed.refreshToken ?? user.refreshToken;
-  user.accessTokenExpiresAt = expiresAt;
-  try {
-    await query(
-      'UPDATE sessions SET access_token = ?, refresh_token = ?, access_token_expires_at = ? WHERE id = ?',
-      [user.accessToken, user.refreshToken, toMysqlDate(expiresAt), user.sessionId],
-    );
-  } catch (error) {
-    // 写回失败不影响本次请求：内存里的 user 已经是新 token。
-    console.error('[auth] 续期后写回会话失败：', error instanceof Error ? error.message : String(error));
+  if (result.status === 401) throw new ApiError(401, 'INVALID_SSO', '统一登录会话已失效');
+  if (!result.ok || !result.user) {
+    throw new ApiError(503, 'SSO_UNAVAILABLE', result.message || '身份服务暂时不可用，请稍后重试');
   }
-  return user.accessToken;
-}
 
-/** 取出可直接调 userinfo 的 access token，必要时先续期。 */
-async function usableAccessToken(user: SessionUser): Promise<string> {
-  const expiresAt = user.accessTokenExpiresAt ? new Date(user.accessTokenExpiresAt).getTime() : 0;
-  const remaining = expiresAt ? expiresAt - Date.now() : Number.MAX_SAFE_INTEGER;
-  if (user.accessToken && remaining > REFRESH_MARGIN_MS) return user.accessToken;
-  if (!user.refreshToken) {
-    if (user.accessToken && remaining > 0) return user.accessToken;
-    await destroySession(user.sessionId);
-    throw new ApiError(401, 'SSO_SESSION_EXPIRED', '登录已过期，请重新登录');
-  }
-  try {
-    return await renewAccessToken(user);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) await destroySession(user.sessionId);
-    throw error;
-  }
-}
-
-async function fetchUserinfo(accessToken: string): Promise<UserinfoProfile> {
-  const resp = await fetch(`${ISSUER}/api/oauth/userinfo`, {
-    headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
+  const sub = String(result.user.sub || result.user.sso_sub || '');
+  if (!sub) throw new ApiError(502, 'SSO_BAD_PROFILE', '统一身份未返回用户标识');
+  await rememberFromSso(result.user);
+  const session = await createSession(sub, {
+    developer: result.user.developer === true,
+    ssoSession: cookie.value,
   });
-  const data = (await resp.json().catch(() => ({}))) as UserinfoProfile & { error?: string };
-  if (resp.status === 401) throw new ApiError(401, 'SSO_TOKEN_REJECTED', 'access token 已失效');
-  if (!resp.ok) throw new ApiError(502, 'SSO_USERINFO_FAILED', data.error || '获取用户信息失败');
-  return data;
-}
+  res.append('Set-Cookie', sessionCookie(req, session.id, session.expires));
+  res.json({ ok: true, developer: result.user.developer === true });
+};
 
-// developer 只认严格布尔 true；字段缺失（线上 SSO 未部署新版本）一律视为无资格。
+export const me = async (req: Request, res: Response): Promise<void> => {
+  const user = req.user;
+  if (!user) throw unauthorized();
+  let developer = false;
+  let qualification: 'ok' | 'none' | 'unknown' = 'none';
+  try {
+    developer = await checkQualification(user);
+    qualification = developer ? 'ok' : 'none';
+  } catch (error) {
+    // SSO 暂时不可用时仍返回身份，让页面显示「稍后重试」而不是整体 503。
+    if (!(error instanceof ApiError) || error.status !== 503) throw error;
+    qualification = 'unknown';
+  }
+  res.json({
+    id: user.id,
+    name: user.name,
+    avatar: user.avatar,
+    email: user.email,
+    ssoSub: user.id,
+    developer,
+    qualification,
+    devLogin: devLoginEnabled(),
+  });
+};
+
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  const user = req.user;
+  if (user?.ssoSession) await sessionRevoke(user.ssoSession);
+  await destroySession(user?.sessionId);
+  res.setHeader('Set-Cookie', clearSessionCookie());
+  clearSsoCookies(res);
+  res.json({ ok: true });
+};
+
+export const devIdentities = async (_req: Request, res: Response): Promise<void> => {
+  if (!devLoginEnabled()) throw new ApiError(404, 'NOT_FOUND', '开发登录未开启');
+  res.json({ items: DEMO_USERS.map(({ id, name }) => ({ id, name })) });
+};
+
+export const devLogin = async (req: Request, res: Response): Promise<void> => {
+  if (!devLoginEnabled()) throw new ApiError(404, 'NOT_FOUND', '开发登录未开启');
+  const userId = String(req.body?.userId ?? req.body?.developerId ?? '').trim();
+  if (!userId) throw badRequest('BAD_REQUEST', '缺少 userId');
+  if (!DEMO_USERS.some((user) => user.id === userId)) throw new ApiError(404, 'NOT_FOUND', '开发者不存在');
+  const session = await createSession(userId, { authMethod: 'dev' });
+  res.setHeader('Set-Cookie', sessionCookie(req, session.id, session.expires));
+  res.json({ ok: true });
+};
+
+// developer 只认严格布尔 true；资格变化的生效延迟上限 = SSO_DEVELOPER_TTL_SECONDS。
 export async function checkQualification(user: SessionUser | null | undefined): Promise<boolean> {
   if (!user) throw unauthorized();
-  // DEV_LOGIN 造的会话没有 SSO token，仅本地联调放行。
-  if (!user.accessToken && !user.refreshToken) return devLoginEnabled();
+  // DEV_LOGIN 造的会话没有 SSO 会话，仅本地联调放行。
+  if (!user.ssoSession) return devLoginEnabled();
 
   const ttl = developerTtlMs();
   if (ttl > 0) {
@@ -356,31 +347,22 @@ export async function checkQualification(user: SessionUser | null | undefined): 
   if (pending) return pending;
 
   const promise = (async () => {
-    let profile: UserinfoProfile;
+    let result;
     try {
-      profile = await fetchUserinfo(await usableAccessToken(user));
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        // token 在最后一刻失效：强制续一次再试。
-        user.accessToken = null;
-        try {
-          profile = await fetchUserinfo(await usableAccessToken(user));
-        } catch (retryError) {
-          if (retryError instanceof ApiError && retryError.status === 401) {
-            await destroySession(user.sessionId);
-            throw new ApiError(401, 'SSO_SESSION_EXPIRED', '登录已过期，请重新登录');
-          }
-          throw new ApiError(503, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
-        }
-      } else {
-        throw new ApiError(503, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
-      }
+      result = await sessionVerify(user.ssoSession as string);
+    } catch {
+      throw new ApiError(503, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
     }
-    const developer = profile.developer === true;
+    if (result.status === 401) {
+      await destroySession(user.sessionId);
+      throw new ApiError(401, 'SSO_SESSION_EXPIRED', '登录已过期，请重新登录');
+    }
+    if (!result.ok || !result.user) {
+      throw new ApiError(503, 'SSO_UNAVAILABLE', '身份服务暂时不可用，请稍后重试');
+    }
+    const developer = result.user.developer === true;
     if (ttl > 0) {
-      const expiresAt = user.accessTokenExpiresAt ? new Date(user.accessTokenExpiresAt).getTime() : 0;
-      const cap = expiresAt || Number.MAX_SAFE_INTEGER;
-      qualificationCache.set(user.sessionId, { developer, expiresAt: Math.min(Date.now() + ttl, cap) });
+      qualificationCache.set(user.sessionId, { developer, expiresAt: Date.now() + ttl });
       pruneQualificationCache();
     }
     return developer;
@@ -398,108 +380,4 @@ export const requireDeveloper = async (req: Request, _res: Response, next: NextF
   const developer = await checkQualification(req.user);
   if (!developer) throw forbidden('NOT_DEVELOPER', '尚未获得开发者资格');
   next();
-};
-
-/** oauth_tx cookie 里的内容。 */
-interface OauthTx {
-  state: string;
-  verifier: string;
-  uri: string;
-  returnTo: string;
-}
-
-function readTx(req: Request): OauthTx | null {
-  const raw = openCookieValue(req.cookies?.[TX_COOKIE]);
-  if (!raw) return null;
-  const { state, verifier, uri, returnTo } = raw;
-  if (typeof state !== 'string' || typeof verifier !== 'string' || typeof uri !== 'string') return null;
-  return { state, verifier, uri, returnTo: safeReturnPath(returnTo, '/') };
-}
-
-export const callback = async (req: Request, res: Response): Promise<void> => {
-  const tx = readTx(req);
-  res.append('Set-Cookie', clearCookieHeader(TX_COOKIE, '/api/auth'));
-  const returnTo = safeReturnPath(tx?.returnTo, '/');
-  const backToLogin = (error: string): void =>
-    redirectSafe(req, res, `/login?error=${encodeURIComponent(error)}&redirect=${encodeURIComponent(returnTo)}`);
-  if (req.query.error) {
-    return backToLogin(String(req.query.error));
-  }
-  if (!tx || String(req.query.state ?? '') !== tx.state) {
-    return backToLogin('state_mismatch');
-  }
-  const code = String(req.query.code || '');
-  if (!code) return backToLogin('missing_code');
-
-  try {
-    const token = await exchangeCode(code, tx.verifier, tx.uri);
-    const profile = await fetchUserinfo(token.access_token as string);
-    const userId = String(profile.sso_sub || profile.sub || '');
-    if (!userId) throw new ApiError(502, 'SSO_BAD_PROFILE', 'SSO 未返回 sub');
-    // userinfo 是当前用户最新的资料：内存缓存 + 落库快照，users/list 不可用时靠它显示名字。
-    await remember({
-      sub: userId,
-      preferred_username: profile.preferred_username,
-      name: profile.name,
-      picture: profile.picture,
-      email: profile.email,
-      developer: profile.developer === true,
-    });
-    const session = await createSession(userId, {
-      accessToken: token.access_token as string,
-      refreshToken: token.refresh_token || null,
-      expiresIn: Number(token.expires_in) || 3600,
-      developer: profile.developer === true,
-    });
-    res.append('Set-Cookie', sessionCookie(req, session.id, session.expires));
-    return redirectSafe(req, res, returnTo);
-  } catch (err) {
-    return backToLogin(err instanceof ApiError ? err.code : 'SSO_ERROR');
-  }
-};
-
-export const me = async (req: Request, res: Response): Promise<void> => {
-  const user = req.user;
-  if (!user) throw unauthorized();
-  let developer = false;
-  let qualification: 'ok' | 'none' | 'unknown' = 'none';
-  try {
-    developer = await checkQualification(user);
-    qualification = developer ? 'ok' : 'none';
-  } catch (error) {
-    // SSO 暂时不可用时仍返回身份，让页面能显示「稍后重试」而不是整体 503。
-    if (!(error instanceof ApiError) || error.status !== 503) throw error;
-    qualification = 'unknown';
-  }
-  res.json({
-    id: user.id,
-    name: user.name,
-    avatar: user.avatar,
-    email: user.email,
-    ssoSub: user.id,
-    developer,
-    qualification,
-    devLogin: devLoginEnabled(),
-  });
-};
-
-export const logout = async (req: Request, res: Response): Promise<void> => {
-  await destroySession(req.user?.sessionId);
-  res.setHeader('Set-Cookie', clearSessionCookie());
-  res.json({ ok: true });
-};
-
-export const devIdentities = async (_req: Request, res: Response): Promise<void> => {
-  if (!devLoginEnabled()) throw new ApiError(404, 'NOT_FOUND', '开发登录未开启');
-  res.json({ items: DEMO_USERS.map(({ id, name }) => ({ id, name })) });
-};
-
-export const devLogin = async (req: Request, res: Response): Promise<void> => {
-  if (!devLoginEnabled()) throw new ApiError(404, 'NOT_FOUND', '开发登录未开启');
-  const userId = String(req.body?.userId ?? req.body?.developerId ?? '').trim();
-  if (!userId) throw badRequest('BAD_REQUEST', '缺少 userId');
-  if (!DEMO_USERS.some((user) => user.id === userId)) throw new ApiError(404, 'NOT_FOUND', '开发者不存在');
-  const session = await createSession(userId, { authMethod: 'dev' });
-  res.setHeader('Set-Cookie', sessionCookie(req, session.id, session.expires));
-  res.json({ ok: true });
 };

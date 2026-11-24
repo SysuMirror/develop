@@ -7,36 +7,59 @@ export interface AuthValue {
   user: Me | null;
   loading: boolean;
   refresh: () => Promise<Me | null>;
+  loginWithPassword: (email: string, password: string) => Promise<Me | null>;
   loginWithDev: (userId: string) => Promise<Me | null>;
   logout: () => Promise<void>;
-  loginUrl: string;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
+
+/**
+ * 首屏登录探测：先看本地会话；没有则用 .ssemarket.cn 的共享 Cookie 静默向 UniSSO 换身份。
+ * 结果三态：
+ *   ok     → 直接进站（用户可能在集市/iwiki/join 等处登录过）
+ *   401    → 落登录页
+ *   503/网络 → 保留现状，不把用户当登出
+ */
+async function probeLogin(): Promise<Me | null> {
+  try {
+    return await api.get<Me>('/auth/me');
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 401) throw error;
+  }
+  try {
+    await api.post('/auth/sso/try');
+    return await api.get<Me>('/auth/me');
+  } catch (error) {
+    if (error instanceof ApiError && [401, 429, 503].includes(error.status)) return null;
+    throw error;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async (): Promise<Me | null> => {
-    try {
-      const me = await api.get<Me>('/auth/me');
-      setUser(me);
-      return me;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setUser(null);
-        return null;
-      }
-      throw error;
-    } finally {
-      setLoading(false);
-    }
+    const me = await api.get<Me>('/auth/me');
+    setUser(me);
+    return me;
   }, []);
 
   useEffect(() => {
-    refresh().catch(() => setLoading(false));
-  }, [refresh]);
+    probeLogin()
+      .then((me) => setUser(me))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const loginWithPassword = useCallback(
+    async (email: string, password: string): Promise<Me | null> => {
+      await api.post('/auth/login', { email, password });
+      return refresh();
+    },
+    [refresh],
+  );
 
   const loginWithDev = useCallback(
     async (userId: string): Promise<Me | null> => {
@@ -51,14 +74,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const loginUrl = useMemo(() => {
-    const here = window.location.pathname + window.location.search;
-    return `/api/auth/login?redirect=${encodeURIComponent(here)}`;
-  }, []);
-
   const value = useMemo(
-    () => ({ user, loading, refresh, loginWithDev, logout, loginUrl }),
-    [user, loading, refresh, loginWithDev, logout, loginUrl],
+    () => ({ user, loading, refresh, loginWithPassword, loginWithDev, logout }),
+    [user, loading, refresh, loginWithPassword, loginWithDev, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

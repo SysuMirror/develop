@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
@@ -10,28 +11,15 @@ function safeTarget(value: string | null): string {
   return value;
 }
 
-// 回调失败时后端把错误码放在 /login?error=…；这里翻成人话。
-const CALLBACK_ERRORS: Record<string, string> = {
-  access_denied: '你在授权页取消了授权',
-  state_mismatch: '登录状态校验失败，请重新发起登录',
-  missing_code: '统一身份没有带回授权码，请重试',
-  SSO_CODE_INVALID: '授权码已失效，请重新登录',
-  SSO_CLIENT_REJECTED: '身份服务未接受本应用凭证，请联系管理员',
-  SSO_TOKEN_FAILED: '换取登录凭证失败，请重试',
-  SSO_UNAVAILABLE: '身份服务暂时不可用，请稍后重试',
-  SSO_BAD_PROFILE: '统一身份返回的用户信息不完整',
-};
-
 export default function LoginPage() {
-  const { user, loading, loginWithDev, loginUrl } = useAuth();
+  const { user, loading, loginWithPassword, loginWithDev } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [identities, setIdentities] = useState<DevIdentity[] | null>(null);
-  const [error, setError] = useState(() => {
-    const code = params.get('error');
-    if (!code) return '';
-    return CALLBACK_ERRORS[code] || `登录失败（${code}）`;
-  });
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const target = safeTarget(params.get('redirect'));
 
   useEffect(() => {
@@ -44,6 +32,21 @@ export default function LoginPage() {
       .then((data) => setIdentities(data.items ?? []))
       .catch(() => setIdentities([]));
   }, []);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setError('');
+    setBusy(true);
+    try {
+      await loginWithPassword(email.trim(), password);
+      navigate(target, { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function pick(userId: string) {
     setError('');
@@ -61,13 +64,36 @@ export default function LoginPage() {
     <div style={{ maxWidth: 480, margin: '24px auto' }}>
       <h1 className="page-title">登录</h1>
       <p className="page-sub">
-        使用 SSE 统一身份授权登录。平台不保存用户资料，身份就是 SSO 的用户 id。
+        使用 SSE 统一身份邮箱与密码登录。已经在集市、iwiki、招聘等站点登录过的，直接进来即可。
       </p>
 
       <div className="panel" style={{ marginTop: 20 }}>
-        <a className="btn btn-primary" href={loginUrl} style={{ width: '100%' }}>
-          使用 SSE 统一身份授权登录
-        </a>
+        <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
+          <label className="faint" htmlFor="login-email">邮箱</label>
+          <input
+            id="login-email"
+            className="input"
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@mail2.sysu.edu.cn"
+            required
+          />
+          <label className="faint" htmlFor="login-password">密码</label>
+          <input
+            id="login-password"
+            className="input"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%', marginTop: 6 }}>
+            {busy ? '登录中…' : '登录'}
+          </button>
+        </form>
         {error ? <div className="notice notice-error" style={{ marginTop: 12 }}>{error}</div> : null}
 
         {identities && identities.length > 0 ? (
