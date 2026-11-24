@@ -19,12 +19,15 @@ export default function ProjectFormPage() {
 function ProjectCreateForm() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: '', misc: '', repoUrl: '', devNotes: '' });
+  const [form, setForm] = useState({ title: '', misc: '', repoUrls: [''], devNotes: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const dirty =
-    form.title.trim() !== '' || form.misc.trim() !== '' || form.repoUrl.trim() !== '' || form.devNotes.trim() !== '';
+    form.title.trim() !== '' ||
+    form.misc.trim() !== '' ||
+    form.repoUrls.some((url) => url.trim() !== '') ||
+    form.devNotes.trim() !== '';
 
   function leave() {
     if (dirty && !window.confirm('放弃尚未创建的项目？')) return;
@@ -40,7 +43,7 @@ function ProjectCreateForm() {
       const created = await api.post<{ id: number }>('/projects', {
         title,
         misc: form.misc.trim() || null,
-        repoUrl: form.repoUrl.trim() || null,
+        repoUrls: form.repoUrls.map((url) => url.trim()).filter(Boolean),
         devNotes: form.devNotes.trim() || null,
       });
       toast.push('项目已创建。', 'success');
@@ -131,17 +134,18 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
   const [form, setForm] = useState({
     title: project.title,
     misc: project.misc ?? '',
-    repoUrl: project.repoUrl ?? '',
+    repoUrls: project.repoUrls.length > 0 ? project.repoUrls : [''],
     devNotes: project.devNotes ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const detailPath = `/projects/${project.id}`;
+  const cleanUrls = (list: string[]) => JSON.stringify(list.map((url) => url.trim()).filter(Boolean));
   const dirty =
     form.title !== project.title ||
     form.misc !== (project.misc ?? '') ||
-    form.repoUrl !== (project.repoUrl ?? '') ||
+    cleanUrls(form.repoUrls) !== cleanUrls(project.repoUrls) ||
     form.devNotes !== (project.devNotes ?? '');
 
   function leave() {
@@ -158,7 +162,7 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
       await api.patch(`/projects/${project.id}`, {
         title,
         misc: form.misc.trim() || null,
-        repoUrl: form.repoUrl.trim() || null,
+        repoUrls: form.repoUrls.map((url) => url.trim()).filter(Boolean),
         devNotes: form.devNotes.trim() || null,
       });
       toast.push('项目已保存。', 'success');
@@ -202,9 +206,16 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
   );
 }
 
+interface ProjectFormState {
+  title: string;
+  misc: string;
+  repoUrls: string[];
+  devNotes: string;
+}
+
 interface ProjectFieldsProps {
-  form: { title: string; misc: string; repoUrl: string; devNotes: string };
-  onChange: (form: { title: string; misc: string; repoUrl: string; devNotes: string }) => void;
+  form: ProjectFormState;
+  onChange: (form: ProjectFormState) => void;
   onSubmitShortcut: () => void;
 }
 
@@ -232,15 +243,43 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
         onSubmitShortcut={onSubmitShortcut}
       />
 
-      <Field label="仓库地址（对外可见）" hint="http(s) 链接，留空则不展示">
-        <input
-          className="input"
-          type="url"
-          value={form.repoUrl}
-          maxLength={512}
-          placeholder="https://github.com/owner/repo"
-          onChange={(event) => onChange({ ...form, repoUrl: event.target.value })}
-        />
+      <Field label="仓库地址（可多个，对外可见）" hint="http(s) 链接；留空则不展示，最多 10 个">
+        <div className="stack" style={{ gap: 8 }}>
+          {form.repoUrls.map((url, index) => (
+            <div className="row" key={index} style={{ gap: 8 }}>
+              <input
+                className="input grow"
+                type="url"
+                value={url}
+                maxLength={512}
+                placeholder="https://github.com/owner/repo"
+                onChange={(event) => {
+                  const next = [...form.repoUrls];
+                  next[index] = event.target.value;
+                  onChange({ ...form, repoUrls: next });
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={form.repoUrls.length <= 1}
+                onClick={() => onChange({ ...form, repoUrls: form.repoUrls.filter((_, i) => i !== index) })}
+              >
+                移除
+              </button>
+            </div>
+          ))}
+          <div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={form.repoUrls.length >= 10}
+              onClick={() => onChange({ ...form, repoUrls: [...form.repoUrls, ''] })}
+            >
+              添加仓库
+            </button>
+          </div>
+        </div>
       </Field>
 
       <MarkdownEditor
@@ -250,7 +289,7 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
         onChange={(devNotes) => onChange({ ...form, devNotes })}
         placeholder={'本地怎么跑？环境变量、分支约定、发布流程、注意事项……'}
         previewEmpty="这里写只给成员看的开发说明，非成员看不到。"
-        hint="对内可见：只有项目成员（含 leader）能看；Ctrl / ⌘ + Enter 保存。"
+        hint="对内可见：只有项目成员（含 leader）能看；附件在项目页的「开发说明」里上传。"
         onSubmitShortcut={onSubmitShortcut}
       />
     </>

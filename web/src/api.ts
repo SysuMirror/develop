@@ -54,18 +54,7 @@ interface ErrorBody {
   error?: { code?: string; message?: string };
 }
 
-async function request<T>(path: string, { method = 'GET', body }: RequestOptions = {}): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`/api${path}`, {
-      method,
-      credentials: 'same-origin',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError('网络异常，请检查连接后重试', { code: 'NETWORK' });
-  }
+async function handleResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
   let data: unknown = null;
   if (text) {
@@ -86,11 +75,47 @@ async function request<T>(path: string, { method = 'GET', body }: RequestOptions
   return data as T;
 }
 
+async function request<T>(path: string, { method = 'GET', body }: RequestOptions = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      credentials: 'same-origin',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError('网络异常，请检查连接后重试', { code: 'NETWORK' });
+  }
+  return handleResponse<T>(res);
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T = { ok: boolean }>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body: body ?? {} }),
   patch: <T = { ok: boolean }>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body: body ?? {} }),
   del: <T = { ok: boolean }>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /**
+   * 原始二进制上传：请求体就是文件本身，真实类型放 x-file-type。
+   * 这样 .json 之类的附件不会被服务端的 express.json 当成请求体解析。
+   */
+  upload: async <T>(path: string, file: File): Promise<T> => {
+    let res: Response;
+    try {
+      res = await fetch(`/api${path}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-file-type': file.type || 'application/octet-stream',
+        },
+        body: file,
+      });
+    } catch {
+      throw new ApiError('网络异常，请检查连接后重试', { code: 'NETWORK' });
+    }
+    return handleResponse<T>(res);
+  },
 };
 
 export function formatTime(value: string | null | undefined): string {

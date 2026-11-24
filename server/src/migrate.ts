@@ -132,6 +132,11 @@ async function migrate(): Promise<void> {
   }
   // 旧库可能还是 developer_id 结构；这里只补列，不做数据迁移（用户实体已不在本地）。
   await ensureColumn('projects', 'repo_url', 'ALTER TABLE projects ADD COLUMN repo_url VARCHAR(512) NULL AFTER misc');
+  await ensureColumn('projects', 'repo_urls', 'ALTER TABLE projects ADD COLUMN repo_urls JSON NULL AFTER repo_url');
+  // 单仓库时代的数据搬进数组；后续以 repo_urls 为准，repo_url 只保留第一个做兼容。
+  await query(
+    "UPDATE projects SET repo_urls = JSON_ARRAY(repo_url) WHERE repo_url IS NOT NULL AND repo_url <> '' AND repo_urls IS NULL",
+  );
   await ensureColumn('projects', 'dev_notes', 'ALTER TABLE projects ADD COLUMN dev_notes TEXT NULL AFTER repo_url');
   await ensureColumn('applies', 'resume_url', 'ALTER TABLE applies ADD COLUMN resume_url VARCHAR(2048) NULL AFTER note');
   await ensureColumn(

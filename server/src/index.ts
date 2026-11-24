@@ -10,6 +10,7 @@ import { pool } from './db.ts';
 import { warm as warmDirectory } from './directory.ts';
 import appliesRouter from './routes/applies.ts';
 import demandsRouter from './routes/demands.ts';
+import filesRouter from './routes/files.ts';
 import joinRouter from './routes/join.ts';
 import projectsRouter from './routes/projects.ts';
 
@@ -70,6 +71,7 @@ export function createApp(): express.Express {
   // 开发者业务要求 UniSSO userinfo 的 developer 严格为 true（DEV_LOGIN 会话除外）。
   app.use('/api', wrap(auth.requireDeveloper));
   app.use('/api', projectsRouter);
+  app.use('/api', filesRouter);
   app.use('/api', appliesRouter);
   app.use('/api', demandsRouter);
   app.use('/api', (_req, res) => {

@@ -4,6 +4,7 @@ import { api, messageOf, qs } from '../api';
 import { useAuth } from '../auth';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
+import { ProjectFilesSection } from '../project-files';
 import {
   APPLY_TYPE,
   DEMAND_STATUS,
@@ -151,13 +152,17 @@ export default function ProjectDetailPage() {
           <dd>
             <TimeAgo value={data.createdAt} />
           </dd>
-          {data.repoUrl ? (
+          {data.repoUrls.length > 0 ? (
             <>
               <dt>仓库</dt>
-              <dd className="truncate">
-                <a className="btn-link" href={data.repoUrl} target="_blank" rel="noreferrer">
-                  {data.repoUrl}
-                </a>
+              <dd>
+                {data.repoUrls.map((url) => (
+                  <div className="truncate" key={url}>
+                    <a className="btn-link" href={url} target="_blank" rel="noreferrer">
+                      {url}
+                    </a>
+                  </div>
+                ))}
               </dd>
             </>
           ) : null}
@@ -177,14 +182,20 @@ export default function ProjectDetailPage() {
         </>
       ) : null}
 
-      {isMember && data.devNotes && data.devNotes.trim() ? (
+      {isMember ? (
         <>
           <div className="section-head">
             <h2>开发说明</h2>
             <span className="faint">仅项目成员可见</span>
           </div>
           <div className="panel">
-            <MarkdownText source={data.devNotes} />
+            {data.devNotes && data.devNotes.trim() ? <MarkdownText source={data.devNotes} /> : null}
+            <div style={{ marginTop: data.devNotes && data.devNotes.trim() ? 16 : 0 }}>
+              <ProjectFilesSection
+                projectId={data.id}
+                canDelete={(file) => isLeader || (file.uploadedBy.id != null && file.uploadedBy.id === myId)}
+              />
+            </div>
           </div>
         </>
       ) : null}

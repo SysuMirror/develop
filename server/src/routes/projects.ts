@@ -9,14 +9,40 @@ import type { DemandJoinedRow, ProjectRow, ProjectSummaryRow, Role } from '../ty
 
 const router = Router();
 
-/** 仓库地址只接受 http(s)，空串按“没填”处理。 */
-function cleanRepoUrl(raw: unknown): string | null {
-  if (raw == null) return null;
-  const value = String(raw).trim();
-  if (!value) return null;
-  if (value.length > 512) throw badRequest('BAD_REPO_URL', '仓库地址过长');
-  if (!/^https?:\/\//i.test(value)) throw badRequest('BAD_REPO_URL', '仓库地址需要以 http:// 或 https:// 开头');
-  return value;
+/** 仓库地址（可多个）：只接受 http(s)，去重，最多 10 个。 */
+const MAX_REPOS = 10;
+
+function cleanRepoUrls(raw: unknown): string[] {
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  const out: string[] = [];
+  for (const item of list) {
+    const value = String(item ?? '').trim();
+    if (!value) continue;
+    if (value.length > 512) throw badRequest('BAD_REPO_URL', '仓库地址过长');
+    if (!/^https?:\/\//i.test(value)) throw badRequest('BAD_REPO_URL', '仓库地址需要以 http:// 或 https:// 开头');
+    if (!out.includes(value)) out.push(value);
+  }
+  if (out.length > MAX_REPOS) throw badRequest('TOO_MANY_REPOS', `最多 ${MAX_REPOS} 个仓库地址`);
+  return out;
+}
+
+/** 读库时兼容单仓库时代的数据。 */
+function repoUrlsOf(row: ProjectRow): string[] {
+  const raw = row.repo_urls;
+  let list: unknown[] = [];
+  if (Array.isArray(raw)) list = raw;
+  else if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      /* 坏数据按空处理，回落到 repo_url */
+    }
+  }
+  const out = list.map((item) => String(item)).filter((item) => item.length > 0);
+  if (out.length === 0 && row.repo_url) out.push(row.repo_url);
+  return out;
 }
 
 /** 开发说明只给成员看；空串按“没填”处理。 */
@@ -36,7 +62,7 @@ async function syncAfterRemoval(userId: string): Promise<void> {
 }
 
 const PROJECT_SUMMARY = `
-  SELECT p.id, p.title, p.misc, p.repo_url, p.created_at, p.updated_at, p.leader_id,
+  SELECT p.id, p.title, p.misc, p.repo_url, p.repo_urls, p.created_at, p.updated_at, p.leader_id,
          (SELECT COUNT(*) FROM project_member m2 WHERE m2.project_id = p.id) AS member_count,
          (SELECT COUNT(*) FROM demands d3 WHERE d3.project_id = p.id AND d3.status = 'waiting') AS waiting_demand_count,
          (SELECT COUNT(*) FROM applies a2 WHERE a2.project_id = p.id AND a2.status = 'waiting') AS pending_apply_count,
@@ -65,7 +91,7 @@ function mapSummary(row: ProjectSummaryRow, people: Awaited<ReturnType<typeof ge
     id: row.id,
     title: row.title,
     misc: row.misc,
-    repoUrl: row.repo_url,
+    repoUrls: repoUrlsOf(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     leader: row.leader_id ? userRef(row.leader_id, people.get(row.leader_id)) : null,
@@ -185,13 +211,15 @@ router.post(
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const title = String(req.body?.title ?? '').trim();
     const misc = req.body?.misc == null ? null : String(req.body.misc).trim();
-    const repoUrl = cleanRepoUrl(req.body?.repoUrl);
+    const repoUrls = cleanRepoUrls(
+      req.body?.repoUrls !== undefined ? req.body.repoUrls : req.body?.repoUrl !== undefined ? [req.body.repoUrl] : [],
+    );
     const devNotes = cleanDevNotes(req.body?.devNotes);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '项目名称必填，且不超过 128 字');
     const projectId = await withTx(async (conn) => {
       const [result] = await conn.query<ResultSetHeader>(
-        'INSERT INTO projects (title, misc, repo_url, dev_notes, leader_id, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-        [title, misc, repoUrl, devNotes, user.id, user.id],
+        'INSERT INTO projects (title, misc, repo_url, repo_urls, dev_notes, leader_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [title, misc, repoUrls[0] ?? null, JSON.stringify(repoUrls), devNotes, user.id, user.id],
       );
       const newId = result.insertId;
       await conn.query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
@@ -288,7 +316,11 @@ router.patch(
       patch.title = title;
     }
     if (req.body?.misc !== undefined) patch.misc = req.body.misc == null ? null : String(req.body.misc).trim();
-    if (req.body?.repoUrl !== undefined) patch.repo_url = cleanRepoUrl(req.body.repoUrl);
+    if (req.body?.repoUrls !== undefined || req.body?.repoUrl !== undefined) {
+      const repoUrls = cleanRepoUrls(req.body.repoUrls !== undefined ? req.body.repoUrls : [req.body.repoUrl]);
+      patch.repo_urls = JSON.stringify(repoUrls);
+      patch.repo_url = repoUrls[0] ?? null;
+    }
     if (req.body?.devNotes !== undefined) patch.dev_notes = cleanDevNotes(req.body.devNotes);
     if (Object.keys(patch).length === 0) throw badRequest('NOTHING_TO_UPDATE', '没有可更新的字段');
     await query('UPDATE projects SET ? WHERE id = ?', [patch, project.id]);

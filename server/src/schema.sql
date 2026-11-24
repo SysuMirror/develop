@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS projects (
   title VARCHAR(128) NOT NULL,
   misc TEXT NULL,
   repo_url VARCHAR(512) NULL,
+  repo_urls JSON NULL,
   dev_notes TEXT NULL,
   leader_id VARCHAR(36) NOT NULL,
   created_by VARCHAR(36) NULL,
@@ -28,6 +29,21 @@ CREATE TABLE IF NOT EXISTS project_member (
   PRIMARY KEY (id),
   UNIQUE KEY uk_member_project_user (project_id, user_id),
   KEY idx_member_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- 项目附件：字节存集市云对象存储（MinIO），这里只留元数据。
+CREATE TABLE IF NOT EXISTS project_file (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  project_id INT UNSIGNED NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  size BIGINT UNSIGNED NOT NULL,
+  content_type VARCHAR(128) NULL,
+  object_key VARCHAR(512) NOT NULL,
+  uploaded_by VARCHAR(36) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_file_project (project_id),
+  KEY idx_file_uploader (uploaded_by)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS applies (

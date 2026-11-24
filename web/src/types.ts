@@ -43,8 +43,8 @@ export interface ProjectSummary {
   id: number;
   title: string;
   misc: string | null;
-  /** 仓库地址：所有能进平台的人都能看到。 */
-  repoUrl: string | null;
+  /** 仓库地址（可多个）：所有能进平台的人都能看到。 */
+  repoUrls: string[];
   createdAt: string;
   updatedAt: string;
   leader: UserRef | null;
@@ -125,6 +125,18 @@ export interface ApplyItem {
   decidedAt: string | null;
   project: { id: number; title: string };
   user: UserRef;
+}
+
+/** GET /api/projects/:id/files：项目附件（字节在对象存储）。 */
+export interface ProjectFile {
+  id: number;
+  name: string;
+  size: number;
+  contentType: string | null;
+  uploadedBy: UserRef;
+  createdAt: string;
+  previewUrl: string;
+  downloadUrl: string;
 }
 
 /** GET /api/directory/search：邀请成员时的候选人。 */
