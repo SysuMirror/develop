@@ -103,18 +103,28 @@ is_stale() {
   return 1
 }
 
+mkdir -p "$ROOT/logs"
+: > "$ROOT/logs/build.log"
+
 # —— server ——
 if [ -f server/package.json ]; then
   cd server
   if is_stale dist/index.js src package.json package-lock.json tsconfig.json; then
     echo "[deploy] server 源码有更新，重新编译…"
-    npm_ci_or_install >/dev/null 2>&1 || npm install --include=dev >/dev/null 2>&1 || true
+    export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}"
     if [ ! -f node_modules/typescript/bin/tsc ]; then
-      npm install --no-save --no-audit --no-fund typescript@5.9.3 @types/node@22 @types/express@4 >/dev/null 2>&1 || true
+      npm_ci_or_install >>"$ROOT/logs/build.log" 2>&1 || npm install --include=dev >>"$ROOT/logs/build.log" 2>&1 || true
+    fi
+    if [ ! -f node_modules/typescript/bin/tsc ]; then
+      # 有些镜像/缓存状态下 npm ci 不会带上 devDependencies，单独装编译器。
+      npm install --no-save --no-audit --no-fund typescript@5.9.3 @types/node@22 @types/express@4 \
+        >>"$ROOT/logs/build.log" 2>&1 \
+        || npm install --no-save --no-audit --no-fund typescript@5.9.3 @types/node@22 @types/express@4 \
+           >>"$ROOT/logs/build.log" 2>&1 || true
     fi
     rm -rf dist.new
     if [ -f node_modules/typescript/bin/tsc ] \
-       && node node_modules/typescript/bin/tsc -p tsconfig.json --outDir dist.new \
+       && node node_modules/typescript/bin/tsc -p tsconfig.json --outDir dist.new >>"$ROOT/logs/build.log" 2>&1 \
        && cp src/schema.sql dist.new/schema.sql; then
       rm -rf dist.old
       mv dist dist.old 2>/dev/null || true
@@ -123,7 +133,8 @@ if [ -f server/package.json ]; then
       echo "[deploy] server 编译完成"
     else
       rm -rf dist.new
-      echo "[deploy] WARN: server 编译失败，继续使用旧 dist（服务不中断）" >&2
+      echo "[deploy] WARN: server 编译失败，继续使用旧 dist（服务不中断），详见 logs/build.log" >&2
+      tail -20 "$ROOT/logs/build.log" >&2 2>/dev/null || true
     fi
   else
     echo "[deploy] server 无需重新编译"
@@ -144,10 +155,10 @@ if [ -f web/package.json ]; then
   cd web
   if is_stale dist/index.html src package.json package-lock.json tsconfig.json vite.config.ts index.html; then
     echo "[deploy] web 源码有更新，重新构建…"
-    npm_ci_or_install >/dev/null 2>&1 || npm install --include=dev >/dev/null 2>&1 || true
+    npm_ci_or_install >>"$ROOT/logs/build.log" 2>&1 || npm install --include=dev >>"$ROOT/logs/build.log" 2>&1 || true
     rm -rf dist.new
     if [ -f node_modules/vite/bin/vite.js ] \
-       && VITE_BASE_PATH=/ VITE_API_BASE= node node_modules/vite/bin/vite.js build --outDir dist.new --emptyOutDir >/dev/null 2>&1; then
+       && VITE_BASE_PATH=/ VITE_API_BASE= node node_modules/vite/bin/vite.js build --outDir dist.new --emptyOutDir >>"$ROOT/logs/build.log" 2>&1; then
       rm -rf dist.old
       mv dist dist.old 2>/dev/null || true
       mv dist.new dist
