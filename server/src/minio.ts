@@ -124,6 +124,47 @@ export interface PresignOptions {
   contentType?: string;
 }
 
+export interface ObjectStream {
+  body: ReadableStream<Uint8Array>;
+  contentType: string | null;
+  contentLength: number | null;
+}
+
+/**
+ * 读取对象并返回可转发的流。
+ * 集市云的 MinIO 只有集群内地址，浏览器访问不到，所以附件统一由应用代理转发，
+ * 不把内部地址写进预签名 URL。
+ */
+export async function getObject(key: string): Promise<ObjectStream> {
+  const url = objectUrl(key);
+  const { amz, date } = amzNow();
+  const payloadHash = sha256Hex('');
+  const canonicalHeaders = `host:${url.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amz}\n`;
+  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = `GET\n${url.pathname}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const scope = `${date}/${REGION}/s3/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amz}\n${scope}\n${sha256Hex(canonicalRequest)}`;
+  const signature = crypto.createHmac('sha256', signingKey(date)).update(stringToSign).digest('hex');
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${scope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const resp = await fetch(url, {
+    headers: { 'x-amz-date': amz, 'x-amz-content-sha256': payloadHash, authorization },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (resp.status === 404) throw new StorageError('对象不存在', 404);
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => '');
+    throw new StorageError(`对象读取失败：HTTP ${resp.status} ${text.slice(0, 200)}`);
+  }
+  const length = Number(resp.headers.get('content-length'));
+  return {
+    body: resp.body,
+    contentType: resp.headers.get('content-type'),
+    contentLength: Number.isFinite(length) ? length : null,
+  };
+}
+
 /** 生成预签名 GET 链接：浏览器直接读存储，不经过应用进程。 */
 export function presignGet(key: string, options: PresignOptions = {}): string {
   const expires = Math.min(Math.max(options.expiresSeconds ?? 3600, 60), 7 * 86400);

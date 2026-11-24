@@ -2,13 +2,15 @@
 // 权限与“开发说明”一致：项目成员可见、可上传；删除限上传者本人或 leader。
 
 import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { Router } from 'express';
 import type { RowDataPacket } from 'mysql2/promise';
 import { loadMembership, loadProject } from '../access.ts';
 import { execute, query } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { ApiError, badRequest, forbidden, notFound, wrap } from '../http.ts';
-import { deleteObject, presignGet, putObject, StorageError, storageConfigured } from '../minio.ts';
+import { deleteObject, getObject, putObject, StorageError, storageConfigured } from '../minio.ts';
 
 const router = Router();
 
@@ -149,13 +151,24 @@ router.get(
     if (!row) throw notFound('附件不存在');
     if (!storageConfigured()) throw new ApiError(503, 'STORAGE_UNAVAILABLE', '对象存储未配置');
     const download = String(req.query.mode || 'download') === 'download';
-    const url = presignGet(row.object_key, {
-      disposition: download ? 'attachment' : 'inline',
-      filename: row.name,
-      contentType: row.content_type || undefined,
-      expiresSeconds: 3600,
-    });
-    res.redirect(302, url);
+    let object;
+    try {
+      object = await getObject(row.object_key);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw new ApiError(error.status === 404 ? 404 : 502, 'STORAGE_ERROR', error.message);
+      }
+      throw error;
+    }
+    const filename = encodeURIComponent(row.name).replace(/['()*]/g, (c) =>
+      `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
+    res.setHeader('Content-Type', row.content_type || object.contentType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${filename}`);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (object.contentLength != null) res.setHeader('Content-Length', String(object.contentLength));
+    await pipeline(Readable.fromWeb(object.body as Parameters<typeof Readable.fromWeb>[0]), res);
   }),
 );
 
