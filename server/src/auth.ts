@@ -253,7 +253,7 @@ function allowSsoProbe(ip: string): boolean {
  */
 export const ssoTry = async (req: Request, res: Response): Promise<void> => {
   if (!ssoConfigured()) throw new ApiError(503, 'SSO_NOT_CONFIGURED', '未配置统一身份凭证');
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  const ip = (String(req.headers['x-forwarded-for'] || '').split(',')[0] || '').trim() || req.ip || 'unknown';
   if (!allowSsoProbe(ip)) throw new ApiError(429, 'TOO_MANY_ATTEMPTS', '尝试过于频繁，请稍后再试');
 
   const cookie = readSsoCookie(req);

@@ -20,9 +20,6 @@ export interface SessionUser {
   developer: boolean | null;
   /** 共享 Cookie 里的 UniSSO 会话 id；开发登录的会话为 null。 */
   ssoSession: string | null;
-  accessToken: string | null;
-  refreshToken: string | null;
-  accessTokenExpiresAt: Date | string | null;
 }
 
 /** 目录 / user_profile 里的一个人。developer 为 null 表示「资格未知」。 */
