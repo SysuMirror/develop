@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, messageOf } from '../api';
+import { api, messageOf, qs } from '../api';
 import { useAuth } from '../auth';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
@@ -19,7 +19,7 @@ import {
   displayName,
   useToast,
 } from '../ui';
-import type { ApplyItem, ProjectDetail } from '../types';
+import type { ApplyItem, DirectoryPerson, ProjectDetail } from '../types';
 
 type DialogKind = 'quit' | 'delete' | 'kick';
 
@@ -38,6 +38,7 @@ export default function ProjectDetailPage() {
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const data = project.data;
   const applyItems = (inbox.data?.items ?? []).filter((item) => String(item.project.id) === String(id));
@@ -150,21 +151,54 @@ export default function ProjectDetailPage() {
           <dd>
             <TimeAgo value={data.createdAt} />
           </dd>
+          {data.repoUrl ? (
+            <>
+              <dt>仓库</dt>
+              <dd className="truncate">
+                <a className="btn-link" href={data.repoUrl} target="_blank" rel="noreferrer">
+                  {data.repoUrl}
+                </a>
+              </dd>
+            </>
+          ) : null}
           <dt>我的角色</dt>
           <dd>{data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : <span className="faint">非成员</span>}</dd>
         </dl>
       </div>
 
-      <div className="section-head">
-        <h2>项目说明</h2>
-      </div>
-      <div className="panel">
-        <MarkdownText source={data.misc} empty="发布时没有填写项目说明。" />
-      </div>
+      {data.misc && data.misc.trim() ? (
+        <>
+          <div className="section-head">
+            <h2>项目说明</h2>
+          </div>
+          <div className="panel">
+            <MarkdownText source={data.misc} />
+          </div>
+        </>
+      ) : null}
+
+      {isMember && data.devNotes && data.devNotes.trim() ? (
+        <>
+          <div className="section-head">
+            <h2>开发说明</h2>
+            <span className="faint">仅项目成员可见</span>
+          </div>
+          <div className="panel">
+            <MarkdownText source={data.devNotes} />
+          </div>
+        </>
+      ) : null}
 
       <div className="section-head">
         <h2>成员</h2>
-        <span className="faint">{data.members.length} 人</span>
+        <span className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <span className="faint">{data.members.length} 人</span>
+          {isLeader ? (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInviteOpen(true)}>
+              邀请成员
+            </button>
+          ) : null}
+        </span>
       </div>
       <div className="panel">
         <div className="list">
@@ -325,6 +359,14 @@ export default function ProjectDetailPage() {
         onClose={() => setDialog(null)}
         onConfirm={() => run(() => api.del(`/projects/${id}`), '已删除项目', () => navigate('/projects'))}
       />
+
+      <InviteMemberDialog
+        open={inviteOpen}
+        projectId={data.id}
+        onClose={() => setInviteOpen(false)}
+        onInvited={() => project.reload()}
+        notify={(message) => push(message, 'success')}
+      />
     </div>
   );
 }
@@ -393,6 +435,135 @@ function DeleteProjectDialog({ open, title, busy, onClose, onConfirm }: DeletePr
       <Field label="项目名称" hint={`输入「${title}」以确认删除。`}>
         <input className="input" value={typed} onChange={(event) => setTyped(event.target.value)} />
       </Field>
+    </Modal>
+  );
+}
+
+interface InviteMemberDialogProps {
+  open: boolean;
+  projectId: number;
+  onClose: () => void;
+  onInvited: () => void;
+  notify: (message: string) => void;
+}
+
+/** leader 直接拉人：按 sub / 用户名 / 姓名 / 邮箱搜统一身份目录，选中即入组。 */
+function InviteMemberDialog({ open, projectId, onClose, onInvited, notify }: InviteMemberDialogProps) {
+  const [term, setTerm] = useState('');
+  const [items, setItems] = useState<DirectoryPerson[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState('');
+
+  useEffect(() => {
+    if (open) return;
+    setTerm('');
+    setItems([]);
+    setError('');
+    setLoading(false);
+    setAdding('');
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const q = term.trim();
+    if (!q) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setError('');
+      api
+        .get<{ items: DirectoryPerson[] }>(`/directory/search${qs({ q, projectId })}`)
+        .then((data) => {
+          if (alive) setItems(data.items);
+        })
+        .catch((err) => {
+          if (alive) setError(messageOf(err));
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [term, open, projectId]);
+
+  async function invite(person: DirectoryPerson) {
+    if (adding) return;
+    setAdding(person.id);
+    setError('');
+    try {
+      await api.post(`/projects/${projectId}/members`, { userId: person.id });
+      notify(`已把 ${displayName(person)} 加入项目`);
+      setItems((prev) => prev.map((item) => (item.id === person.id ? { ...item, isMember: true } : item)));
+      onInvited();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setAdding('');
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="邀请成员"
+      sub="输入统一身份的名字、用户名、邮箱或 ID，选中后直接加入项目。"
+      onClose={onClose}
+      wide
+      footer={
+        <button type="button" className="btn btn-secondary" onClick={onClose}>
+          完成
+        </button>
+      }
+    >
+      <Field label="搜索成员" hint={loading ? '搜索中…' : '支持姓名、用户名、邮箱、用户 ID'}>
+        <input
+          className="input"
+          autoFocus
+          value={term}
+          placeholder="例如：常应常静 / sse_278 / 2215020897@qq.com"
+          onChange={(event) => setTerm(event.target.value)}
+        />
+      </Field>
+      {error ? <div className="notice notice-error">{error}</div> : null}
+      {term.trim() && !loading && items.length === 0 && !error ? (
+        <p className="faint" style={{ margin: '8px 0 0' }}>
+          没有找到匹配的人。
+        </p>
+      ) : null}
+      <div className="list" style={{ marginTop: items.length ? 8 : 0 }}>
+        {items.map((person) => (
+          <div className="list__row" key={person.id}>
+            <Avatar name={displayName(person)} src={person.avatar} />
+            <div className="grow">
+              <span>{displayName(person)}</span>
+              <div className="faint truncate">
+                {person.username ? `@${person.username}` : person.id}
+                {person.email ? ` · ${person.email}` : ''}
+              </div>
+            </div>
+            {person.isMember ? (
+              <Badge tone="gray">已在项目</Badge>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={Boolean(adding)}
+                onClick={() => void invite(person)}
+              >
+                {adding === person.id ? '加入中…' : '加入项目'}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </Modal>
   );
 }

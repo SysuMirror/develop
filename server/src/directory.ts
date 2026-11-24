@@ -265,6 +265,29 @@ export async function lookup(id: unknown): Promise<LookupResult> {
   return { known: stale ? null : false, user: null };
 }
 
+/**
+ * 按 sub / 用户名 / 姓名 / 邮箱模糊找人，用于 leader 邀请成员。
+ * 目录不可用时只搜本地缓存与 user_profile，不阻塞；返回按相关度排序。
+ */
+export async function searchUsers(term: unknown, limit = 12): Promise<DirectoryUser[]> {
+  const q = String(term ?? '').trim().toLowerCase();
+  if (q.length < 1) return [];
+  const { users } = await snapshot();
+  const exact: DirectoryUser[] = [];
+  const prefix: DirectoryUser[] = [];
+  const partial: DirectoryUser[] = [];
+  for (const user of users.values()) {
+    const id = user.id.toLowerCase();
+    const username = (user.username ?? '').toLowerCase();
+    const name = (user.name ?? '').toLowerCase();
+    const email = (user.email ?? '').toLowerCase();
+    if (id === q) exact.push(user);
+    else if (username.startsWith(q) || name.startsWith(q)) prefix.push(user);
+    else if (id.includes(q) || username.includes(q) || name.includes(q) || email.includes(q)) partial.push(user);
+  }
+  return [...exact, ...prefix, ...partial].slice(0, limit);
+}
+
 // 接口里引用某个用户时的统一形状；user 缺失说明目录里没有或目录不可用，前端显示「未知用户」。
 export function userRef(id: unknown, user: DirectoryUser | null | undefined): UserRef {
   return {

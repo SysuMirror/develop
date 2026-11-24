@@ -1,13 +1,30 @@
 import { Router } from 'express';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { loadMembership, loadProject, requireLeader } from '../access.ts';
-import { query, withTx } from '../db.ts';
-import { getUsers, userRef } from '../directory.ts';
+import { isDuplicateEntry, query, withTx } from '../db.ts';
+import { getUsers, lookup, searchUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
 import { revokeIfNoMembership } from '../qual-sync.ts';
 import type { DemandJoinedRow, ProjectRow, ProjectSummaryRow, Role } from '../types.ts';
 
 const router = Router();
+
+/** 仓库地址只接受 http(s)，空串按“没填”处理。 */
+function cleanRepoUrl(raw: unknown): string | null {
+  if (raw == null) return null;
+  const value = String(raw).trim();
+  if (!value) return null;
+  if (value.length > 512) throw badRequest('BAD_REPO_URL', '仓库地址过长');
+  if (!/^https?:\/\//i.test(value)) throw badRequest('BAD_REPO_URL', '仓库地址需要以 http:// 或 https:// 开头');
+  return value;
+}
+
+/** 开发说明只给成员看；空串按“没填”处理。 */
+function cleanDevNotes(raw: unknown): string | null {
+  if (raw == null) return null;
+  const value = String(raw).trim();
+  return value ? value : null;
+}
 
 // 成员关系变更后，不再属于任何项目的用户撤销 UniSSO 资格；失败不阻塞业务。
 async function syncAfterRemoval(userId: string): Promise<void> {
@@ -19,7 +36,7 @@ async function syncAfterRemoval(userId: string): Promise<void> {
 }
 
 const PROJECT_SUMMARY = `
-  SELECT p.id, p.title, p.misc, p.created_at, p.updated_at, p.leader_id,
+  SELECT p.id, p.title, p.misc, p.repo_url, p.created_at, p.updated_at, p.leader_id,
          (SELECT COUNT(*) FROM project_member m2 WHERE m2.project_id = p.id) AS member_count,
          (SELECT COUNT(*) FROM demands d3 WHERE d3.project_id = p.id AND d3.status = 'waiting') AS waiting_demand_count,
          (SELECT COUNT(*) FROM applies a2 WHERE a2.project_id = p.id AND a2.status = 'waiting') AS pending_apply_count,
@@ -48,6 +65,7 @@ function mapSummary(row: ProjectSummaryRow, people: Awaited<ReturnType<typeof ge
     id: row.id,
     title: row.title,
     misc: row.misc,
+    repoUrl: row.repo_url,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     leader: row.leader_id ? userRef(row.leader_id, people.get(row.leader_id)) : null,
@@ -133,6 +151,8 @@ router.get(
     const membership = await loadMembership(project.id, user.id);
     res.json({
       ...mapSummary(summary, people),
+      // 开发说明只对成员开放；非成员拿到的永远是 null。
+      devNotes: membership ? project.dev_notes : null,
       members: members.map((row) => ({
         userId: row.user_id,
         name: people.get(row.user_id)?.name ?? null,
@@ -165,11 +185,13 @@ router.post(
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const title = String(req.body?.title ?? '').trim();
     const misc = req.body?.misc == null ? null : String(req.body.misc).trim();
+    const repoUrl = cleanRepoUrl(req.body?.repoUrl);
+    const devNotes = cleanDevNotes(req.body?.devNotes);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '项目名称必填，且不超过 128 字');
     const projectId = await withTx(async (conn) => {
       const [result] = await conn.query<ResultSetHeader>(
-        'INSERT INTO projects (title, misc, leader_id, created_by) VALUES (?, ?, ?, ?)',
-        [title, misc, user.id, user.id],
+        'INSERT INTO projects (title, misc, repo_url, dev_notes, leader_id, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+        [title, misc, repoUrl, devNotes, user.id, user.id],
       );
       const newId = result.insertId;
       await conn.query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
@@ -181,6 +203,74 @@ router.post(
     });
     const created = await loadSummary(user.id, projectId);
     res.status(201).json(mapSummary(created, await getUsers([created.leader_id])));
+  }),
+);
+
+// 邀请成员用的人名/ID 搜索：先按 sub、用户名、姓名、邮箱模糊匹配，再按相关度排序。
+router.get(
+  '/directory/search',
+  wrap(async (req, res) => {
+    const user = req.user;
+    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
+    const term = String(req.query.q ?? '').trim();
+    if (!term) {
+      res.json({ items: [] });
+      return;
+    }
+    const projectId = Number(req.query.projectId);
+    const people = await searchUsers(term, 12);
+    let memberIds = new Set<string>();
+    if (Number.isInteger(projectId) && projectId > 0) {
+      const rows = await query<{ user_id: string }>('SELECT user_id FROM project_member WHERE project_id = ?', [projectId]);
+      memberIds = new Set(rows.map((row) => String(row.user_id)));
+    }
+    res.json({
+      items: people.map((person) => ({
+        id: person.id,
+        name: person.name,
+        username: person.username,
+        avatar: person.avatar,
+        email: person.email,
+        developer: person.developer,
+        isMember: memberIds.has(person.id),
+      })),
+    });
+  }),
+);
+
+// leader 按 id 直接拉人进项目（不走申请）。对方必须是统一身份目录里存在的账号。
+router.post(
+  '/projects/:id/members',
+  wrap(async (req, res) => {
+    const project = await loadProject(req.params.id);
+    const user = req.user;
+    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
+    await requireLeader(project, user);
+    const targetId = String(req.body?.userId ?? '').trim();
+    if (!targetId || targetId.length > 64) throw badRequest('BAD_USER', '缺少要邀请的用户');
+    if (targetId === project.leader_id) throw conflict('ALREADY_MEMBER', '对方已经是项目成员');
+    if (await loadMembership(project.id, targetId)) throw conflict('ALREADY_MEMBER', '对方已经是项目成员');
+    const found = await lookup(targetId);
+    if (found.known === false) throw notFound('统一身份目录里找不到这个账号');
+    if (found.known === null) throw conflict('DIRECTORY_UNAVAILABLE', '身份目录暂时不可用，稍后再试');
+    try {
+      await query("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'participant')", [
+        project.id,
+        targetId,
+      ]);
+    } catch (error) {
+      if (isDuplicateEntry(error)) throw conflict('ALREADY_MEMBER', '对方已经是项目成员');
+      throw error;
+    }
+    res.status(201).json({
+      ok: true,
+      member: {
+        userId: targetId,
+        name: found.user?.name ?? null,
+        avatar: found.user?.avatar ?? null,
+        role: 'participant' as const,
+      },
+    });
   }),
 );
 
@@ -198,6 +288,8 @@ router.patch(
       patch.title = title;
     }
     if (req.body?.misc !== undefined) patch.misc = req.body.misc == null ? null : String(req.body.misc).trim();
+    if (req.body?.repoUrl !== undefined) patch.repo_url = cleanRepoUrl(req.body.repoUrl);
+    if (req.body?.devNotes !== undefined) patch.dev_notes = cleanDevNotes(req.body.devNotes);
     if (Object.keys(patch).length === 0) throw badRequest('NOTHING_TO_UPDATE', '没有可更新的字段');
     await query('UPDATE projects SET ? WHERE id = ?', [patch, project.id]);
     const updated = await loadSummary(user.id, project.id);

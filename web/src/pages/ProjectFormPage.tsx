@@ -19,11 +19,12 @@ export default function ProjectFormPage() {
 function ProjectCreateForm() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: '', misc: '' });
+  const [form, setForm] = useState({ title: '', misc: '', repoUrl: '', devNotes: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const dirty = form.title.trim() !== '' || form.misc.trim() !== '';
+  const dirty =
+    form.title.trim() !== '' || form.misc.trim() !== '' || form.repoUrl.trim() !== '' || form.devNotes.trim() !== '';
 
   function leave() {
     if (dirty && !window.confirm('放弃尚未创建的项目？')) return;
@@ -36,7 +37,12 @@ function ProjectCreateForm() {
     setSaving(true);
     setError(null);
     try {
-      const created = await api.post<{ id: number }>('/projects', { title, misc: form.misc.trim() || null });
+      const created = await api.post<{ id: number }>('/projects', {
+        title,
+        misc: form.misc.trim() || null,
+        repoUrl: form.repoUrl.trim() || null,
+        devNotes: form.devNotes.trim() || null,
+      });
       toast.push('项目已创建。', 'success');
       navigate(`/projects/${created.id}`);
     } catch (err) {
@@ -122,12 +128,21 @@ function ProjectEditForm({ id }: { id: string }) {
 function ProjectEditFields({ project }: { project: ProjectDetail }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: project.title, misc: project.misc ?? '' });
+  const [form, setForm] = useState({
+    title: project.title,
+    misc: project.misc ?? '',
+    repoUrl: project.repoUrl ?? '',
+    devNotes: project.devNotes ?? '',
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const detailPath = `/projects/${project.id}`;
-  const dirty = form.title !== project.title || form.misc !== (project.misc ?? '');
+  const dirty =
+    form.title !== project.title ||
+    form.misc !== (project.misc ?? '') ||
+    form.repoUrl !== (project.repoUrl ?? '') ||
+    form.devNotes !== (project.devNotes ?? '');
 
   function leave() {
     if (dirty && !window.confirm('放弃未保存的修改？')) return;
@@ -140,7 +155,12 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/projects/${project.id}`, { title, misc: form.misc.trim() || null });
+      await api.patch(`/projects/${project.id}`, {
+        title,
+        misc: form.misc.trim() || null,
+        repoUrl: form.repoUrl.trim() || null,
+        devNotes: form.devNotes.trim() || null,
+      });
       toast.push('项目已保存。', 'success');
       navigate(detailPath);
     } catch (err) {
@@ -183,8 +203,8 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
 }
 
 interface ProjectFieldsProps {
-  form: { title: string; misc: string };
-  onChange: (form: { title: string; misc: string }) => void;
+  form: { title: string; misc: string; repoUrl: string; devNotes: string };
+  onChange: (form: { title: string; misc: string; repoUrl: string; devNotes: string }) => void;
   onSubmitShortcut: () => void;
 }
 
@@ -208,7 +228,29 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
         onChange={(misc) => onChange({ ...form, misc })}
         placeholder={'这个项目要解决什么问题？技术栈与协作方式是什么？'}
         previewEmpty="在左侧写项目说明，这里会实时渲染。"
-        hint="支持 Markdown；列表里只显示纯文本摘要，Ctrl / ⌘ + Enter 保存。"
+        hint="对外可见；列表里只显示纯文本摘要，Ctrl / ⌘ + Enter 保存。"
+        onSubmitShortcut={onSubmitShortcut}
+      />
+
+      <Field label="仓库地址（对外可见）" hint="http(s) 链接，留空则不展示">
+        <input
+          className="input"
+          type="url"
+          value={form.repoUrl}
+          maxLength={512}
+          placeholder="https://github.com/owner/repo"
+          onChange={(event) => onChange({ ...form, repoUrl: event.target.value })}
+        />
+      </Field>
+
+      <MarkdownEditor
+        id="project-dev-notes"
+        label="开发说明（仅项目成员可见）"
+        value={form.devNotes}
+        onChange={(devNotes) => onChange({ ...form, devNotes })}
+        placeholder={'本地怎么跑？环境变量、分支约定、发布流程、注意事项……'}
+        previewEmpty="这里写只给成员看的开发说明，非成员看不到。"
+        hint="对内可见：只有项目成员（含 leader）能看；Ctrl / ⌘ + Enter 保存。"
         onSubmitShortcut={onSubmitShortcut}
       />
     </>

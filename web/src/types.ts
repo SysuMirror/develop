@@ -43,6 +43,8 @@ export interface ProjectSummary {
   id: number;
   title: string;
   misc: string | null;
+  /** 仓库地址：所有能进平台的人都能看到。 */
+  repoUrl: string | null;
   createdAt: string;
   updatedAt: string;
   leader: UserRef | null;
@@ -78,6 +80,8 @@ export interface ProjectPermissions {
 }
 
 export interface ProjectDetail extends ProjectSummary {
+  /** 开发说明：只有项目成员拿得到，非成员为 null。 */
+  devNotes: string | null;
   members: ProjectMember[];
   demands: ProjectDemand[];
   permissions: ProjectPermissions;
@@ -121,4 +125,15 @@ export interface ApplyItem {
   decidedAt: string | null;
   project: { id: number; title: string };
   user: UserRef;
+}
+
+/** GET /api/directory/search：邀请成员时的候选人。 */
+export interface DirectoryPerson {
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatar: string | null;
+  email: string | null;
+  developer: boolean;
+  isMember: boolean;
 }

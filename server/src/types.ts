@@ -46,6 +46,10 @@ export interface ProjectRow {
   id: number;
   title: string;
   misc: string | null;
+  /** 仓库地址：所有能进平台的人都能看到。 */
+  repo_url: string | null;
+  /** 开发说明：只给项目成员看。 */
+  dev_notes: string | null;
   leader_id: string | null;
   created_by: string | null;
   created_at: Date;

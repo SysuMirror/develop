@@ -131,6 +131,8 @@ async function migrate(): Promise<void> {
     await query(statement);
   }
   // 旧库可能还是 developer_id 结构；这里只补列，不做数据迁移（用户实体已不在本地）。
+  await ensureColumn('projects', 'repo_url', 'ALTER TABLE projects ADD COLUMN repo_url VARCHAR(512) NULL AFTER misc');
+  await ensureColumn('projects', 'dev_notes', 'ALTER TABLE projects ADD COLUMN dev_notes TEXT NULL AFTER repo_url');
   await ensureColumn('applies', 'resume_url', 'ALTER TABLE applies ADD COLUMN resume_url VARCHAR(2048) NULL AFTER note');
   await ensureColumn(
     'applies',
