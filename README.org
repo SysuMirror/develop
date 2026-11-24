@@ -19,7 +19,7 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 | 页面     | 路由                        | 说明                                                                           |
 |----------+-----------------------------+--------------------------------------------------------------------------------|
 | 概览     | =/=                         | 与我有关 / 与我无关两块：我的待办与项目、最近发生的事                          |
-| 登录     | =/login=                    | UniSSO 跳转授权登录； =DEV_LOGIN= 开启时另列演示身份                           |
+| 登录     | =/login=                    | 邮箱密码或静默 SSO； =DEV_LOGIN= 开启时另列演示身份                           |
 | 项目列表 | =/projects=                 | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页           |
 | 项目详情 | =/projects/:id=             | 说明按 Markdown 渲染；成员、需求、申请箱；leader 可删除项目、移出成员          |
 | 新建项目 | =/projects/new=             | 名称与 Markdown 说明；创建后成为 leader 并跳到项目页                           |
@@ -41,35 +41,27 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 
 * 二、身份与资格
 
-** 登录方式：跳转授权
+** 登录方式：无感（邮箱密码 + 共享 Cookie）
 
-本应用在 UniSSO 侧登记为对外（ =kind= 为 =external= ）应用，只能走标准授权码流程：
-=GET /api/auth/login= → =/authorize= → 同意页 → 回调带 =code= → 后端换 token → 取 =userinfo= 。
-external 应用调 =password/verify= 一律返回 =403 password_verify_forbidden= ，
-所以登录页没有邮箱密码表单，只有「使用 SSE 统一身份授权登录」一个入口。
+本应用在 UniSSO 侧登记为内部（ =kind= 为 =internal= ）应用，开启 =m2m_enabled= 。
+登录不跳转，两条路径：
 
-- 每次授权都展示同意页（ =auto_approved= 恒为 false），做不到静默重登；
-- =code= 一次性，过期或重复使用返回 =invalid_grant= ；
-- 没有 RP-initiated logout，也没有令牌吊销端点，退出只清本地会话；
-- access token 有效期 1 小时，过期前用会话里保存的 =refresh_token= 续期，
-  续期失败的会话才要求重新授权。
+1. 邮箱密码：=POST /api/auth/login= → 服务端调 =POST /api/oauth/password/verify= ；
+2. 静默：页面加载先试本地会话，没有再 =POST /api/auth/sso/try= ，
+   读 =unisso_sid= （兼容旧名 =sse_sso= ）→ =POST /api/oauth/session/verify= 。
+   用户只要在集市、iwiki、招聘等任一站点登录过，这里直接进站。
 
-** UniSSO 授权登录
+- 登录成功按 UniSSO 响应里的 =sso_cookie_*= 字段种父域 Cookie（ =Domain=.ssemarket.cn= ）；
+- 不再保存 access token / refresh token，资格直接由 =session/verify= 的 =developer= 判断；
+- 登出 =POST /api/auth/logout=：=session/revoke= 吊销父域会话，并清本地会话与两个 Cookie 名；
+- 未配置 SSO 时把 =DEV_LOGIN= 设为 =1= ， =/login= 会列出演示身份，便于本地联调；生产必须 =0= 。
 
-=auth= 走 UniSSO（ =https://sso.ssemarket.cn= ，授权码 + PKCE S256），这是唯一登录方式。
-配置 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= / =SSO_REDIRECT_URI= 后即可用真实身份登录。
-
-1. =GET /api/auth/login= 生成一次性 =state= 与 PKCE verifier / challenge，302 到 =authorize= ；
-2. 回调 =GET /api/auth/callback= 用 =code_verifier= 换 token，按 =sub= 建本地会话；
-3. 会话落在 MySQL 的 =sessions= 表（会话 id 为 43 字符），签发 HMAC 签名 Cookie
-   （ =SESSION_SECRET= ，有效期 =SESSION_DAYS= ，默认 30 天），access token 随会话保存，
-   用于后续校验开发者资格。
-
-未配置 SSO 时若把 =DEV_LOGIN= 设为 =1= ， =/login= 页面会列出演示开发者供点击登录，便于本地联调。
+会话落在 MySQL 的 =sessions= 表（会话 id 为 43 字符），签发 HMAC 签名 Cookie
+（ =SESSION_SECRET= ，有效期 =SESSION_DAYS= ，默认 30 天）。
 
 ** 开发者资格门禁
 
-授权登录的会话用保存的 access token 调 =/api/oauth/userinfo= ，只有 =developer= 字段严格为 =true=
+资格判定用会话里保存的 UniSSO 会话 id 调 =POST /api/oauth/session/verify= ，只有 =developer= 字段严格为 =true=
 才放行项目、申请、需求等业务接口；不带该字段、为 false 或类型不对一律拒绝。结果按
 =SSO_DEVELOPER_TTL_SECONDS= （默认 60 秒）缓存，可按需调低或设为 0 关闭缓存。
 =DEV_LOGIN= 造的会话没有 SSO token，只在 =DEV_LOGIN= 开启时放行。
@@ -358,8 +350,8 @@ Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （�
 
 ** 登录与联调
 
-- 本应用是对外应用，走 =/authorize= 跳转授权； =password/verify= 与 =users/list= 这类 M2M
-  接口对 external 应用一律 =403 password_verify_forbidden= ，不要再据此判断密码对错。
+- 本应用是内接应用（ =kind= 为 =internal= 、 =m2m_enabled= 为 1），密码校验走 =password/verify= ，
+  静默登录走 =session/verify= ；两者都返回 =403= 时先查应用类型、开关与客户端 secret。
 - 部署或重启后先跑 =npm run check:sso= ：用本应用凭证调 =/api/oauth/introspect= （token 留空），
   期望 =200 {"active":false}= ；返回 =401 invalid_client= 说明 secret 不对或已被重置。
 - 没有 SSO 应用时把 =DEV_LOGIN= 设为 =1= ，直接点演示身份登录；演示身份不查 SSO，视为有开发者资格。
