@@ -544,6 +544,12 @@ function InviteMemberDialog({ open, projectId, onClose, onInvited, notify }: Inv
             <Avatar name={displayName(person)} src={person.avatar} />
             <div className="grow">
               <span>{displayName(person)}</span>
+              {person.developer ? null : (
+                <>
+                  {' '}
+                  <Badge tone="amber">未开通开发者</Badge>
+                </>
+              )}
               <div className="faint truncate">
                 {person.username ? `@${person.username}` : person.id}
                 {person.email ? ` · ${person.email}` : ''}
