@@ -4,6 +4,7 @@ import { loadMembership, loadProject, requireLeader } from '../access.ts';
 import { isDuplicateEntry, query, withTx } from '../db.ts';
 import { getUsers, lookup, searchUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
+import { deleteObject, storageConfigured } from '../minio.ts';
 import { revokeIfNoMembership } from '../qual-sync.ts';
 import type { DemandJoinedRow, ProjectRow, ProjectSummaryRow, Role } from '../types.ts';
 
@@ -341,16 +342,30 @@ router.delete(
       [project.id],
     );
     if (Number(blocking?.n ?? 0) > 0) throw conflict('DEMAND_IN_PROGRESS', '项目还有进行中的需求，先完成后再删除');
+    const fileRows = await query<{ object_key: string }>('SELECT object_key FROM project_file WHERE project_id = ?', [
+      project.id,
+    ]);
     const members = await withTx(async (conn) => {
       const [rows] = await conn.query<RowDataPacket[]>('SELECT user_id FROM project_member WHERE project_id = ?', [
         project.id,
       ]);
+      await conn.query('DELETE FROM project_file WHERE project_id = ?', [project.id]);
       await conn.query('DELETE FROM applies WHERE project_id = ?', [project.id]);
       await conn.query('DELETE FROM demands WHERE project_id = ?', [project.id]);
       await conn.query('DELETE FROM project_member WHERE project_id = ?', [project.id]);
       await conn.query('DELETE FROM projects WHERE id = ?', [project.id]);
       return rows.map((row) => String(row.user_id));
     });
+    // 对象存储里的附件跟着项目一起清掉；失败只记日志，不回滚已删除的项目。
+    if (storageConfigured()) {
+      for (const file of fileRows) {
+        try {
+          await deleteObject(file.object_key);
+        } catch (error) {
+          console.error('[projects] 删除附件对象失败', file.object_key, error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
     // 项目连同成员关系一起消失，逐个检查是否还需要开发者资格（可能仍在别的项目里）。
     for (const memberId of new Set([...members, project.leader_id])) {
       if (memberId) await syncAfterRemoval(memberId);
