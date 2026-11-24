@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS project_member (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   project_id INT UNSIGNED NOT NULL,
   user_id VARCHAR(36) NOT NULL,
-  role ENUM('leader','participant') NOT NULL,
+  role ENUM('owner','admin','member') NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uk_member_project_user (project_id, user_id),

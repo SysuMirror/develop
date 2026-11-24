@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { loadMembership, loadProject, requireLeader } from '../access.ts';
+import { loadMembership, loadProject, roleOf, requireManager, requireOwner } from '../access.ts';
 import { isDuplicateEntry, query, withTx } from '../db.ts';
 import { getUsers, lookup, searchUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
@@ -67,7 +67,10 @@ const PROJECT_SUMMARY = `
          (SELECT COUNT(*) FROM project_member m2 WHERE m2.project_id = p.id) AS member_count,
          (SELECT COUNT(*) FROM demands d3 WHERE d3.project_id = p.id AND d3.status = 'waiting') AS waiting_demand_count,
          (SELECT COUNT(*) FROM applies a2 WHERE a2.project_id = p.id AND a2.status = 'waiting') AS pending_apply_count,
-         (SELECT m.role FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? LIMIT 1) AS my_role,
+         CASE WHEN p.leader_id = ?
+              THEN 'owner'
+              ELSE (SELECT m.role FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? LIMIT 1)
+          END AS my_role,
          (SELECT a.status FROM applies a WHERE a.project_id = p.id AND a.user_id = ? AND a.status = 'waiting'
            ORDER BY a.id LIMIT 1) AS my_apply_status
     FROM projects p`;
@@ -95,7 +98,7 @@ function mapSummary(row: ProjectSummaryRow, people: Awaited<ReturnType<typeof ge
     repoUrls: repoUrlsOf(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    leader: row.leader_id ? userRef(row.leader_id, people.get(row.leader_id)) : null,
+    owner: row.leader_id ? userRef(row.leader_id, people.get(row.leader_id)) : null,
     memberCount: Number(row.member_count),
     waitingDemandCount: Number(row.waiting_demand_count),
     pendingApplyCount: Number(row.pending_apply_count),
@@ -105,7 +108,12 @@ function mapSummary(row: ProjectSummaryRow, people: Awaited<ReturnType<typeof ge
 }
 
 async function loadSummary(userId: string, projectId: number): Promise<ProjectSummaryRow> {
-  const [summary] = await query<ProjectSummaryRow>(`${PROJECT_SUMMARY} WHERE p.id = ?`, [userId, userId, projectId]);
+  const [summary] = await query<ProjectSummaryRow>(`${PROJECT_SUMMARY} WHERE p.id = ?`, [
+    userId,
+    userId,
+    userId,
+    projectId,
+  ]);
   if (!summary) throw notFound('项目不存在');
   return summary;
 }
@@ -124,12 +132,14 @@ router.get(
       conditions.push('p.title LIKE ?');
       filterParams.push(term);
     }
-    if (filter === 'mine-leader') {
-      conditions.push('p.leader_id = ?');
+    if (filter === 'mine-owner' || filter === 'mine-leader') {
+      conditions.push(
+        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role = 'owner')",
+      );
       filterParams.push(user.id);
     } else if (filter === 'mine-member') {
       conditions.push(
-        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role = 'participant')",
+        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role IN ('admin','member'))",
       );
       filterParams.push(user.id);
     } else if (filter === 'recruiting') {
@@ -138,7 +148,7 @@ router.get(
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = await query<ProjectSummaryRow>(
       `${PROJECT_SUMMARY} ${where} ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?`,
-      [user.id, user.id, ...filterParams, pageSize, offset],
+      [user.id, user.id, user.id, ...filterParams, pageSize, offset],
     );
     const [counted] = await query<{ total: number | string }>(
       `SELECT COUNT(*) AS total FROM projects p ${where}`,
@@ -160,7 +170,7 @@ router.get(
       `SELECT m.user_id, m.role, m.created_at
          FROM project_member m
         WHERE m.project_id = ?
-        ORDER BY FIELD(m.role, 'leader', 'participant'), m.created_at`,
+        ORDER BY FIELD(m.role, 'owner', 'admin', 'member'), m.created_at`,
       [project.id],
     );
     const demands = await query<ProjectDemandRow>(
@@ -175,16 +185,26 @@ router.get(
       ...members.map((row) => row.user_id),
       ...demands.map((row) => row.user_id),
     ]);
-    const membership = await loadMembership(project.id, user.id);
+    const role = await roleOf(project, user.id);
+    const owners = members
+      .filter((row) => row.role === 'owner')
+      .map((row) => ({
+        userId: row.user_id,
+        name: people.get(row.user_id)?.name ?? null,
+        avatar: people.get(row.user_id)?.avatar ?? null,
+        username: people.get(row.user_id)?.username ?? null,
+      }));
     res.json({
       ...mapSummary(summary, people),
       // 开发说明只对成员开放；非成员拿到的永远是 null。
-      devNotes: membership ? project.dev_notes : null,
+      devNotes: role ? project.dev_notes : null,
+      owners,
       members: members.map((row) => ({
         userId: row.user_id,
         name: people.get(row.user_id)?.name ?? null,
         avatar: people.get(row.user_id)?.avatar ?? null,
         role: row.role,
+        isPrimary: row.user_id === project.leader_id,
         joinedAt: row.created_at,
       })),
       demands: demands.map((row) => ({
@@ -196,10 +216,13 @@ router.get(
         assignee: row.user_id ? userRef(row.user_id, people.get(row.user_id)) : null,
       })),
       permissions: {
-        isMember: Boolean(membership),
-        isLeader: project.leader_id === user.id,
-        canApply: !membership,
-        canManage: project.leader_id === user.id,
+        isMember: Boolean(role),
+        role,
+        isOwner: role === 'owner',
+        isAdmin: role === 'owner' || role === 'admin',
+        canApply: !role,
+        canManage: role === 'owner' || role === 'admin',
+        canDelete: role === 'owner',
       },
     });
   }),
@@ -226,7 +249,7 @@ router.post(
       await conn.query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
         newId,
         user.id,
-        'leader',
+        'owner',
       ]);
       return newId;
     });
@@ -267,25 +290,32 @@ router.get(
   }),
 );
 
-// leader 按 id 直接拉人进项目（不走申请）。对方必须是统一身份目录里存在的账号。
+// 所有者/管理员按 id 直接拉人进项目（不走申请）。可顺便授予“管理员”。
 router.post(
   '/projects/:id/members',
   wrap(async (req, res) => {
     const project = await loadProject(req.params.id);
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    await requireLeader(project, user);
+    await requireManager(project, user);
     const targetId = String(req.body?.userId ?? '').trim();
     if (!targetId || targetId.length > 64) throw badRequest('BAD_USER', '缺少要邀请的用户');
+    const role = String(req.body?.role ?? 'member');
+    if (role !== 'member' && role !== 'admin') throw badRequest('BAD_ROLE', '邀请角色只能是 member 或 admin');
     if (targetId === project.leader_id) throw conflict('ALREADY_MEMBER', '对方已经是项目成员');
     if (await loadMembership(project.id, targetId)) throw conflict('ALREADY_MEMBER', '对方已经是项目成员');
+    // 管理员只能邀请普通成员；授予管理员/所有者需要 owner 权限。
+    if (role === 'admin' && (await roleOf(project, user.id)) !== 'owner') {
+      throw forbidden('NOT_OWNER', '只有项目所有者可以授予管理员');
+    }
     const found = await lookup(targetId);
     if (found.known === false) throw notFound('统一身份目录里找不到这个账号');
     if (found.known === null) throw conflict('DIRECTORY_UNAVAILABLE', '身份目录暂时不可用，稍后再试');
     try {
-      await query("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'participant')", [
+      await query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
         project.id,
         targetId,
+        role,
       ]);
     } catch (error) {
       if (isDuplicateEntry(error)) throw conflict('ALREADY_MEMBER', '对方已经是项目成员');
@@ -297,9 +327,38 @@ router.post(
         userId: targetId,
         name: found.user?.name ?? null,
         avatar: found.user?.avatar ?? null,
-        role: 'participant' as const,
+        role,
       },
     });
+  }),
+);
+
+// 调整成员角色：member ↔ admin 由所有者操作；授予/撤销 owner 只归首任 owner。
+router.patch(
+  '/projects/:id/members/:userId',
+  wrap(async (req, res) => {
+    const project = await loadProject(req.params.id);
+    const user = req.user;
+    if (!user) throw forbidden('NOT_MEMBER', '请先登录');
+    await requireOwner(project, user);
+    const targetId = String(req.params.userId || '');
+    const role = String(req.body?.role ?? '');
+    if (!['owner', 'admin', 'member'].includes(role)) throw badRequest('BAD_ROLE', '角色只能是 owner / admin / member');
+    if (targetId === project.leader_id) throw forbidden('PRIMARY_OWNER_LOCKED', '首任所有者不能被改角色');
+    const membership = await loadMembership(project.id, targetId);
+    if (!membership) throw notFound('该用户不是项目成员');
+    if (membership.role === 'owner' && project.leader_id !== user.id) {
+      throw forbidden('NOT_PRIMARY_OWNER', '只有首任所有者可以调整其他所有者的角色');
+    }
+    if (role === 'owner' && project.leader_id !== user.id) {
+      throw forbidden('NOT_PRIMARY_OWNER', '只有首任所有者可以任命新的所有者');
+    }
+    await query('UPDATE project_member SET role = ? WHERE project_id = ? AND user_id = ?', [
+      role,
+      project.id,
+      targetId,
+    ]);
+    res.json({ ok: true, role });
   }),
 );
 
@@ -309,7 +368,7 @@ router.patch(
     const project = await loadProject(req.params.id);
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    await requireLeader(project, user);
+    await requireManager(project, user);
     const patch: Record<string, string | null> = {};
     if (req.body?.title !== undefined) {
       const title = String(req.body.title).trim();
@@ -336,7 +395,7 @@ router.delete(
     const project = await loadProject(req.params.id);
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    await requireLeader(project, user);
+    await requireOwner(project, user);
     const [blocking] = await query<{ n: number | string }>(
       "SELECT COUNT(*) AS n FROM demands WHERE project_id = ? AND status IN ('accepted', 'review')",
       [project.id],
@@ -380,8 +439,8 @@ router.delete(
     const project = await loadProject(req.params.id);
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    if (project.leader_id === user.id) {
-      throw conflict('LEADER_CANNOT_LEAVE', 'leader 不能退出项目；不需要它时请删除项目');
+    if ((await roleOf(project, user.id)) === 'owner') {
+      throw conflict('OWNER_CANNOT_LEAVE', '所有者不能直接退出：请先由首任所有者调整角色，或删除项目');
     }
     const membership = await loadMembership(project.id, user.id);
     if (!membership) throw notFound('你不是该项目成员');
@@ -397,11 +456,18 @@ router.delete(
     const project = await loadProject(req.params.id);
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
-    await requireLeader(project, user);
+    await requireManager(project, user);
     const targetId = String(req.params.userId);
-    if (targetId === project.leader_id) throw forbidden('CANNOT_FIRE_LEADER', '不能移除 leader');
+    if (targetId === project.leader_id) throw forbidden('CANNOT_REMOVE_PRIMARY_OWNER', '不能移除首任所有者');
     const membership = await loadMembership(project.id, targetId);
     if (!membership) throw notFound('该用户不是项目成员');
+    const actorRole = await roleOf(project, user.id);
+    if (membership.role === 'owner' && project.leader_id !== user.id) {
+      throw forbidden('NOT_PRIMARY_OWNER', '只有首任所有者可以移除其他所有者');
+    }
+    if (membership.role === 'admin' && actorRole !== 'owner') {
+      throw forbidden('NOT_OWNER', '只有项目所有者可以移除管理员');
+    }
     await query('DELETE FROM project_member WHERE project_id = ? AND user_id = ?', [project.id, targetId]);
     await syncAfterRemoval(targetId);
     res.json({ ok: true });

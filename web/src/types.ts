@@ -2,7 +2,7 @@
 
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type DemandStatus = 'waiting' | 'accepted' | 'review' | 'completed' | 'suspended';
-export type Role = 'leader' | 'participant';
+export type Role = 'owner' | 'admin' | 'member';
 export type ApplyType = 'leader' | 'participant';
 export type ApplySource = 'web' | 'join';
 export type Qualification = 'ok' | 'none' | 'unknown';
@@ -47,7 +47,8 @@ export interface ProjectSummary {
   repoUrls: string[];
   createdAt: string;
   updatedAt: string;
-  leader: UserRef | null;
+  /** 首任所有者（建项人）；完整所有者列表在详情里。 */
+  owner: UserRef | null;
   memberCount: number;
   waitingDemandCount: number;
   pendingApplyCount: number;
@@ -60,6 +61,8 @@ export interface ProjectMember {
   name: string | null;
   avatar: string | null;
   role: Role;
+  /** 建项人（首任所有者），不能被移除或改角色。 */
+  isPrimary: boolean;
   joinedAt: string;
 }
 
@@ -74,14 +77,26 @@ export interface ProjectDemand {
 
 export interface ProjectPermissions {
   isMember: boolean;
-  isLeader: boolean;
+  role: Role | null;
+  isOwner: boolean;
+  /** 所有者或管理员：可编辑项目、审批申请、邀请/移出成员。 */
+  isAdmin: boolean;
   canApply: boolean;
   canManage: boolean;
+  canDelete: boolean;
+}
+
+export interface ProjectOwner {
+  userId: string;
+  name: string | null;
+  avatar: string | null;
+  username: string | null;
 }
 
 export interface ProjectDetail extends ProjectSummary {
   /** 开发说明：只有项目成员拿得到，非成员为 null。 */
   devNotes: string | null;
+  owners: ProjectOwner[];
   members: ProjectMember[];
   demands: ProjectDemand[];
   permissions: ProjectPermissions;

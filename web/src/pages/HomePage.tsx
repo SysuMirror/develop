@@ -68,7 +68,7 @@ export default function HomePage() {
   const { user } = useAuth();
   const myId = user?.id ?? null;
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
-  const myProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-leader', pageSize: PAGE_SIZE })}`);
+  const myProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-owner', pageSize: PAGE_SIZE })}`);
   const memberProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-member', pageSize: PAGE_SIZE })}`);
   const allProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ pageSize: PAGE_SIZE })}`);
   const feed = useDemandFeed();
@@ -81,7 +81,7 @@ export default function HomePage() {
   const resolved = latest(completed, (item) => item.completedAt ?? item.createdAt, PREVIEW);
   const leading = myProjects.data?.items ?? [];
   const createdProjects = latest(allProjects.data?.items ?? [], (item) => item.createdAt, PREVIEW);
-  // leader 与 participant 互斥，两个 total 相加即「我加入的全部项目」。
+  // 所有者/管理员与成员互斥，两个 total 相加即「我加入的全部项目」。
   const joinedCount = (myProjects.data?.total ?? 0) + (memberProjects.data?.total ?? 0);
   const joinedLoading = myProjects.loading || memberProjects.loading;
 
@@ -104,13 +104,13 @@ export default function HomePage() {
       to: '/me',
       label: '我参与的项目',
       value: joinedLoading ? '—' : joinedCount,
-      hint: '你是 leader 或成员的项目',
+      hint: '你是所有者、管理员或成员的项目',
     },
     {
-      to: '/projects?filter=mine-leader',
+      to: '/projects?filter=mine-owner',
       label: '我负责的项目',
       value: myProjects.loading ? '—' : (myProjects.data?.total ?? 0),
-      hint: '你是 leader 的项目',
+      hint: '你是所有者或管理员的项目',
     },
   ];
 
@@ -188,7 +188,7 @@ export default function HomePage() {
           <PreviewPanel
             title="我负责的项目"
             count={`${myProjects.data?.total ?? 0} 个`}
-            moreTo="/projects?filter=mine-leader"
+            moreTo="/projects?filter=mine-owner"
             loading={myProjects.loading}
             error={myProjects.error ? myProjects.error.message : null}
             empty={leading.length === 0}
@@ -265,7 +265,7 @@ export default function HomePage() {
                     {project.title}
                   </Link>
                   <div className="faint truncate">
-                    Leader {displayName(project.leader)} · {project.memberCount} 位成员 ·{' '}
+                    所有者 {displayName(project.owner)} · {project.memberCount} 位成员 ·{' '}
                     <TimeAgo value={project.createdAt} />
                   </div>
                 </div>

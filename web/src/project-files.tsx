@@ -30,7 +30,7 @@ function previewable(contentType: string | null): boolean {
 
 interface Props {
   projectId: number;
-  /** 只有上传者本人或 leader 能删。 */
+  /** 只有上传者本人或所有者/管理员能删。 */
   canDelete: (file: ProjectFile) => boolean;
 }
 

@@ -63,7 +63,7 @@ function ProjectCreateForm() {
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
           <h1 className="page-title">新建项目</h1>
-          <p className="page-sub">创建后你将成为该项目的 leader，可以审批成员申请并发布需求。</p>
+          <p className="page-sub">创建后你将成为该项目的所有者，可以审批成员申请并发布需求。</p>
         </div>
         <div className="row page-actions">
           <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
@@ -119,7 +119,7 @@ function ProjectEditForm({ id }: { id: string }) {
           ← 返回项目
         </Link>
         <div className="notice notice-info" style={{ marginTop: 12 }}>
-          只有项目 leader 可以编辑项目。
+          只有项目所有者或管理员可以编辑项目。
         </div>
       </div>
     );
@@ -289,7 +289,7 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
         onChange={(devNotes) => onChange({ ...form, devNotes })}
         placeholder={'本地怎么跑？环境变量、分支约定、发布流程、注意事项……'}
         previewEmpty="这里写只给成员看的开发说明，非成员看不到。"
-        hint="对内可见：只有项目成员（含 leader）能看；附件在项目页的「开发说明」里上传。"
+        hint="对内可见：只有项目成员（含所有者/管理员）能看；附件在项目页的「开发说明」里上传。"
         onSubmitShortcut={onSubmitShortcut}
       />
     </>

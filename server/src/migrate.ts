@@ -82,6 +82,42 @@ async function dedupeDemands(): Promise<void> {
   }
 }
 
+// 项目角色从 leader/participant 改为 owner/admin/member：
+// 先扩枚举让新值可写，搬完数据再收紧，避免严格模式下截断报错。
+async function migrateMemberRoles(): Promise<void> {
+  const [column] = await query<{ type: string }>(
+    `SELECT COLUMN_TYPE AS type
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'project_member' AND COLUMN_NAME = 'role'`,
+  );
+  const type = (column?.type || '').toLowerCase();
+  if (!type) return;
+  if (type.includes("'leader'") || type.includes("'participant'")) {
+    await query("ALTER TABLE project_member MODIFY COLUMN role ENUM('leader','participant','owner','admin','member') NOT NULL");
+    await query("UPDATE project_member SET role = 'owner' WHERE role = 'leader'");
+    await query("UPDATE project_member SET role = 'member' WHERE role = 'participant'");
+    await query("ALTER TABLE project_member MODIFY COLUMN role ENUM('owner','admin','member') NOT NULL");
+    console.log('project_member.role -> owner/admin/member');
+  }
+  // 兜底：确保每个项目 leader_id 都有一条 owner 成员行。
+  const [orphanOwners] = await query<{ n: number | string }>(
+    `SELECT COUNT(*) AS n
+       FROM projects p
+      WHERE NOT EXISTS (
+        SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = p.leader_id AND m.role = 'owner')`,
+  );
+  if (Number(orphanOwners?.n ?? 0) > 0) {
+    await query(
+      `INSERT INTO project_member (project_id, user_id, role)
+       SELECT p.id, p.leader_id, 'owner' FROM projects p
+        WHERE NOT EXISTS (
+          SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = p.leader_id)
+       ON DUPLICATE KEY UPDATE role = 'owner'`,
+    );
+    console.log(`backfill owner members: ${orphanOwners?.n}`);
+  }
+}
+
 // 每个项目必须恰好一个 leader：先把历史 leader 缺位行修好，再把列收紧为 NOT NULL。
 // 有成员的项目把最早加入者升为 leader；没有任何成员的项目无法满足约束，级联删除并打日志。
 async function enforceLeaderRequired(): Promise<void> {
@@ -94,12 +130,12 @@ async function enforceLeaderRequired(): Promise<void> {
       [project.id],
     );
     if (member) {
-      await query("UPDATE project_member SET role = 'leader' WHERE project_id = ? AND user_id = ?", [
+      await query("UPDATE project_member SET role = 'owner' WHERE project_id = ? AND user_id = ?", [
         project.id,
         member.user_id,
       ]);
       await query('UPDATE projects SET leader_id = ? WHERE id = ?', [member.user_id, project.id]);
-      console.log(`promote leader: project ${project.id} ${JSON.stringify(project.title)} -> ${member.user_id}`);
+      console.log(`promote owner: project ${project.id} ${JSON.stringify(project.title)} -> ${member.user_id}`);
       continue;
     }
     console.log(`drop leaderless project: id=${project.id} title=${JSON.stringify(project.title)}`);
@@ -175,6 +211,9 @@ async function migrate(): Promise<void> {
   await ensureDemandStatusEnum();
   // 去重必须排在唯一索引之前，否则 ALTER 会因重复键失败。
   await dedupeDemands();
+  // 角色枚举改名（leader→owner、participant→member、新增 admin）必须在
+  // enforceLeaderRequired 之前完成，否则它写入的 owner 会被旧枚举拒绝。
+  await migrateMemberRoles();
   // 收紧 leader 约束要排在列表查询/索引之前，旧库的 NULL 行必须先清掉。
   await enforceLeaderRequired();
   await ensureIndex(
@@ -210,16 +249,16 @@ async function seed(): Promise<void> {
     await query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
       inserted.insertId,
       leaderId,
-      'leader',
+      'owner',
     ]);
   }
 
   const members: Array<[number, string, string]> = [
-    [1, sub(1), 'participant'],
-    [1, sub(2), 'participant'],
-    [2, sub(3), 'participant'],
-    [3, sub(4), 'participant'],
-    [4, sub(5), 'participant'],
+    [1, sub(1), 'member'],
+    [1, sub(2), 'member'],
+    [2, sub(3), 'member'],
+    [3, sub(4), 'member'],
+    [4, sub(5), 'member'],
   ];
   for (const [projectId, userId, role] of members) {
     await query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [projectId, userId, role]);

@@ -45,9 +45,9 @@ router.post(
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const type = String(req.body?.type ?? 'participant');
     const note = req.body?.note == null ? null : String(req.body.note).trim();
-    // 项目始终有 leader，leader 型申请不再有意义，只接受成员申请。
+    // 项目始终有所有者，owner 型申请不再有意义，只接受成员申请。
     if (type !== 'participant') throw badRequest('BAD_TYPE', 'type 只能是 participant');
-    if (project.leader_id === user.id) throw conflict('ALREADY_MEMBER', '你已经是该项目 leader');
+    if (project.leader_id === user.id) throw conflict('ALREADY_MEMBER', '你已经是该项目所有者');
     const membership = await loadMembership(project.id, user.id);
     if (membership) throw conflict('ALREADY_MEMBER', '你已经是该项目成员');
 
@@ -91,9 +91,11 @@ router.get(
     const rows = await query<ApplyJoinedRow>(
       `${APPLY_SELECT}
         WHERE a.status = 'waiting'
-          AND p.leader_id = ?
+          AND (p.leader_id = ?
+               OR EXISTS (SELECT 1 FROM project_member m
+                           WHERE m.project_id = p.id AND m.user_id = ? AND m.role IN ('owner','admin')))
         ORDER BY a.created_at`,
-      [req.user?.id],
+      [req.user?.id, req.user?.id],
     );
     res.json({ items: await mapApplies(rows) });
   }),
@@ -106,7 +108,7 @@ router.post(
     if (!apply) throw notFound('申请不存在');
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '该申请已被处理');
     const decider = req.user;
-    if (!decider) throw forbidden('NOT_LEADER', '请先登录');
+    if (!decider) throw forbidden('NOT_MEMBER', '请先登录');
     await requireApplyDecider(apply, decider);
 
     await withTx(async (conn) => {
@@ -114,14 +116,14 @@ router.post(
         'SELECT role FROM project_member WHERE project_id = ? AND user_id = ? FOR UPDATE',
         [apply.project_id, apply.user_id],
       );
-      // 项目始终有 leader，审批通过的申请只能是成员。
+      // 项目始终有所有者，审批通过的申请只能是成员。
       if (memberships.length > 0) {
-        await conn.query("UPDATE project_member SET role = 'participant' WHERE project_id = ? AND user_id = ?", [
+        await conn.query("UPDATE project_member SET role = 'member' WHERE project_id = ? AND user_id = ?", [
           apply.project_id,
           apply.user_id,
         ]);
       } else {
-        await conn.query("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'participant')", [
+        await conn.query("INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, 'member')", [
           apply.project_id,
           apply.user_id,
         ]);
@@ -153,7 +155,7 @@ router.post(
     if (!apply) throw notFound('申请不存在');
     if (apply.status !== 'waiting') throw conflict('NOT_PENDING', '该申请已被处理');
     const decider = req.user;
-    if (!decider) throw forbidden('NOT_LEADER', '请先登录');
+    if (!decider) throw forbidden('NOT_MEMBER', '请先登录');
     await requireApplyDecider(apply, decider);
     await query("UPDATE applies SET status = 'rejected', decided_at = NOW(), decided_by = ? WHERE id = ?", [
       decider.id,

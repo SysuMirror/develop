@@ -63,6 +63,17 @@ export default function ProjectDetailPage() {
     }
   };
 
+  /** 所有者调整成员角色：成员 / 管理员 / 所有者（首任所有者不可改）。 */
+  async function changeRole(userId: string, role: string) {
+    try {
+      await api.patch(`/projects/${id}/members/${userId}`, { role });
+      push('角色已更新', 'success');
+      project.reload();
+    } catch (error) {
+      push(messageOf(error), 'error');
+    }
+  }
+
   if (project.loading) {
     return (
       <div>
@@ -80,10 +91,10 @@ export default function ProjectDetailPage() {
   if (!data) return null;
 
   const permissions = data.permissions;
-  const leader = data.leader;
-  const isLeader = permissions.isLeader;
+  const isOwner = permissions.isOwner;
+  const isAdmin = permissions.isAdmin;
   const isMember = permissions.isMember;
-  const canAcceptApply = isLeader;
+  const canAcceptApply = isAdmin;
   const myId = user?.id;
 
   return (
@@ -98,7 +109,7 @@ export default function ProjectDetailPage() {
           <div className="row" style={{ marginTop: 8 }}>
             <Badge tone="gray">{data.memberCount} 位成员</Badge>
             <Badge tone={data.waitingDemandCount ? 'amber' : 'gray'}>{data.waitingDemandCount} 个待接需求</Badge>
-            {isLeader ? <Badge tone="blue">{applyItems.length} 条待审申请</Badge> : null}
+            {isAdmin ? <Badge tone="blue">{applyItems.length} 条待审申请</Badge> : null}
             {data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : null}
           </div>
         </div>
@@ -117,17 +128,19 @@ export default function ProjectDetailPage() {
               发布需求
             </button>
           ) : null}
-          {isLeader ? (
+          {isAdmin ? (
             <>
               <button type="button" className="btn btn-secondary" onClick={() => navigate(`/projects/${id}/edit`)}>
                 编辑
               </button>
-              <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'delete' })}>
-                删除项目
-              </button>
+              {isOwner ? (
+                <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'delete' })}>
+                  删除项目
+                </button>
+              ) : null}
             </>
           ) : null}
-          {isMember && !isLeader ? (
+          {isMember && !isOwner ? (
             <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'quit' })}>
               退出项目
             </button>
@@ -137,13 +150,17 @@ export default function ProjectDetailPage() {
 
       <div className="panel">
         <dl className="kv">
-          <dt>Leader</dt>
+          <dt>所有者</dt>
           <dd>
-            {leader ? (
-              <span className="row" style={{ gap: 6, display: 'inline-flex' }}>
-                <Avatar name={displayName(leader)} src={leader.avatar} />
-                {displayName(leader)}
-              </span>
+            {data.owners.length > 0 ? (
+              <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+                {data.owners.map((owner) => (
+                  <span className="row" key={owner.userId} style={{ gap: 6, display: 'inline-flex' }}>
+                    <Avatar name={displayName(owner)} src={owner.avatar} />
+                    {displayName(owner)}
+                  </span>
+                ))}
+              </div>
             ) : (
               <span className="faint">—</span>
             )}
@@ -193,7 +210,7 @@ export default function ProjectDetailPage() {
             <div style={{ marginTop: data.devNotes && data.devNotes.trim() ? 16 : 0 }}>
               <ProjectFilesSection
                 projectId={data.id}
-                canDelete={(file) => isLeader || (file.uploadedBy.id != null && file.uploadedBy.id === myId)}
+                canDelete={(file) => isAdmin || (file.uploadedBy.id != null && file.uploadedBy.id === myId)}
               />
             </div>
           </div>
@@ -204,7 +221,7 @@ export default function ProjectDetailPage() {
         <h2>成员</h2>
         <span className="row" style={{ gap: 10, alignItems: 'center' }}>
           <span className="faint">{data.members.length} 人</span>
-          {isLeader ? (
+          {isAdmin ? (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInviteOpen(true)}>
               邀请成员
             </button>
@@ -222,8 +239,25 @@ export default function ProjectDetailPage() {
                   加入于 <TimeAgo value={member.joinedAt} />
                 </div>
               </div>
-              <StatusBadge map={ROLE} value={member.role} />
-              {isLeader && member.userId !== myId ? (
+              {member.isPrimary ? <Badge tone="blue">首任</Badge> : null}
+              {isOwner && !member.isPrimary && member.userId !== myId ? (
+                <select
+                  className="input"
+                  style={{ width: 110, padding: '4px 8px' }}
+                  value={member.role}
+                  onChange={(event) => void changeRole(member.userId, event.target.value)}
+                >
+                  <option value="owner">所有者</option>
+                  <option value="admin">管理员</option>
+                  <option value="member">成员</option>
+                </select>
+              ) : (
+                <StatusBadge map={ROLE} value={member.role} />
+              )}
+              {isAdmin &&
+              !member.isPrimary &&
+              member.userId !== myId &&
+              (isOwner || member.role === 'member') ? (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm btn-danger"
@@ -374,6 +408,7 @@ export default function ProjectDetailPage() {
       <InviteMemberDialog
         open={inviteOpen}
         projectId={data.id}
+        canGrantAdmin={isOwner}
         onClose={() => setInviteOpen(false)}
         onInvited={() => project.reload()}
         notify={(message) => push(message, 'success')}
@@ -453,18 +488,21 @@ function DeleteProjectDialog({ open, title, busy, onClose, onConfirm }: DeletePr
 interface InviteMemberDialogProps {
   open: boolean;
   projectId: number;
+  /** 只有所有者能把新成员直接设为管理员。 */
+  canGrantAdmin: boolean;
   onClose: () => void;
   onInvited: () => void;
   notify: (message: string) => void;
 }
 
-/** leader 直接拉人：按 sub / 用户名 / 姓名 / 邮箱搜统一身份目录，选中即入组。 */
-function InviteMemberDialog({ open, projectId, onClose, onInvited, notify }: InviteMemberDialogProps) {
+/** 所有者/管理员直接拉人：按 sub / 用户名 / 姓名 / 邮箱搜统一身份目录，选中即入组。 */
+function InviteMemberDialog({ open, projectId, canGrantAdmin, onClose, onInvited, notify }: InviteMemberDialogProps) {
   const [term, setTerm] = useState('');
   const [items, setItems] = useState<DirectoryPerson[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState('');
+  const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
 
   useEffect(() => {
     if (open) return;
@@ -473,6 +511,7 @@ function InviteMemberDialog({ open, projectId, onClose, onInvited, notify }: Inv
     setError('');
     setLoading(false);
     setAdding('');
+    setInviteRole('member');
   }, [open]);
 
   useEffect(() => {
@@ -510,7 +549,7 @@ function InviteMemberDialog({ open, projectId, onClose, onInvited, notify }: Inv
     setAdding(person.id);
     setError('');
     try {
-      await api.post(`/projects/${projectId}/members`, { userId: person.id });
+      await api.post(`/projects/${projectId}/members`, { userId: person.id, role: inviteRole });
       notify(`已把 ${displayName(person)} 加入项目`);
       setItems((prev) => prev.map((item) => (item.id === person.id ? { ...item, isMember: true } : item)));
       onInvited();
@@ -543,6 +582,18 @@ function InviteMemberDialog({ open, projectId, onClose, onInvited, notify }: Inv
           onChange={(event) => setTerm(event.target.value)}
         />
       </Field>
+      {canGrantAdmin ? (
+        <Field label="加入身份" hint="管理员可以管理整个项目（审批申请、邀请/移出成员、编辑项目）。">
+          <select
+            className="input"
+            value={inviteRole}
+            onChange={(event) => setInviteRole(event.target.value === 'admin' ? 'admin' : 'member')}
+          >
+            <option value="member">成员</option>
+            <option value="admin">管理员</option>
+          </select>
+        </Field>
+      ) : null}
       {error ? <div className="notice notice-error">{error}</div> : null}
       {term.trim() && !loading && items.length === 0 && !error ? (
         <p className="faint" style={{ margin: '8px 0 0' }}>

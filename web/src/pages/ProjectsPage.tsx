@@ -13,7 +13,7 @@ interface FilterItem {
 
 const FILTERS: FilterItem[] = [
   { key: 'all', label: '全部' },
-  { key: 'mine-leader', label: '我领导的' },
+  { key: 'mine-owner', label: '我负责的' },
   { key: 'mine-member', label: '我参与的' },
   { key: 'recruiting', label: '招募中' },
 ];
@@ -50,7 +50,7 @@ export default function ProjectsPage() {
             <thead>
               <tr>
                 <th>项目</th>
-                <th>Leader</th>
+                <th>所有者</th>
                 <th className="right">成员</th>
                 <th className="right">待接需求</th>
                 <th>我的状态</th>
@@ -66,7 +66,7 @@ export default function ProjectsPage() {
                       {project.misc || '暂无说明'}
                     </div>
                   </td>
-                  <td>{project.leader ? project.leader.name : <span className="faint">—</span>}</td>
+                  <td>{project.owner ? project.owner.name : <span className="faint">—</span>}</td>
                   <td className="right">{project.memberCount}</td>
                   <td className="right">
                     {project.waitingDemandCount > 0 ? (
@@ -94,7 +94,7 @@ export default function ProjectsPage() {
                 </div>
                 {project.misc ? <p className="list-card__desc">{project.misc}</p> : null}
                 <div className="list-card__meta">
-                  <span>Leader {project.leader ? project.leader.name : '—'}</span>
+                  <span>所有者 {project.owner ? project.owner.name : '—'}</span>
                   <span>{project.memberCount} 位成员</span>
                   <span>
                     {project.waitingDemandCount > 0 ? `${project.waitingDemandCount} 个待接需求` : '暂无待接需求'}
@@ -116,7 +116,7 @@ export default function ProjectsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">项目</h1>
-          <p className="page-sub">每个项目有一个 leader 与若干成员；leader 负责审批加入申请与发布需求。</p>
+          <p className="page-sub">每个项目有若干所有者、管理员与成员；所有者与管理员负责审批加入申请、邀请成员与发布需求。</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => navigate('/projects/new')}>
           新建项目

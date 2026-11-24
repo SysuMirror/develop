@@ -20,24 +20,24 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 |----------+-----------------------------+--------------------------------------------------------------------------------|
 | 概览     | =/=                         | 与我有关 / 与我无关两块：我的待办与项目、最近发生的事                          |
 | 登录     | =/login=                    | 邮箱密码或静默 SSO； =DEV_LOGIN= 开启时另列演示身份                           |
-| 项目列表 | =/projects=                 | 关键词搜索；筛选 =mine-leader= / =mine-member= / =recruiting= ；分页           |
-| 项目详情 | =/projects/:id=             | 只展示已填写的内容：项目说明、仓库地址（对外）、开发说明（仅成员）；成员、需求、申请箱；leader 可邀请/移出成员、删除项目 |
-| 新建项目 | =/projects/new=             | 名称、项目说明、仓库地址、开发说明；创建后成为 leader 并跳到项目页             |
-| 项目编辑 | =/projects/:id/edit=        | 同新建页字段，初值取接口；仅 leader 可进                                       |
+| 项目列表 | =/projects=                 | 关键词搜索；筛选 =mine-owner= / =mine-member= / =recruiting= ；分页           |
+| 项目详情 | =/projects/:id=             | 只展示已填写的内容：项目说明、仓库地址（对外）、开发说明（仅成员）；成员、需求、申请箱；所有者/管理员可邀请、移出、改角色，删除项目仅所有者 |
+| 新建项目 | =/projects/new=             | 名称、项目说明、仓库地址、开发说明；创建后成为所有者并跳到项目页             |
+| 项目编辑 | =/projects/:id/edit=        | 同新建页字段，初值取接口；仅所有者/管理员可进                                       |
 | 发布需求 | =/projects/:id/demands/new= | 标题与 Markdown 细节；项目成员可用，发布后跳到需求详情                         |
-| 申请加入 | =/projects/:id/apply=       | 一句留言，提交后回项目页等待 leader 审批                                       |
+| 申请加入 | =/projects/:id/apply=       | 一句留言，提交后回项目页等待所有者/管理员审批                                       |
 | 需求     | =/demands=                  | 五种状态页签与「全部 / 我发布的 / 我接的」视角；列表只读，不内联操作按钮       |
 | 需求详情 | =/demands/:id=              | 状态、项目、发布者、接单人；正文按 Markdown 渲染；接单、提交、验收、挂起在这里；发布者改过正文后可看「已修改 N 次」与行级 diff |
 | 需求编辑 | =/demands/:id/edit=         | 独立编辑页：左写 Markdown、右实时预览， =Ctrl/⌘ + Enter= 保存；仅发布者可用    |
 | 我的     | =/me=                       | 待我审批、我参与的项目、个人参与的需求                                         |
 
 概览页只读，全部复用项目、申请、需求的现有列表接口，不新增后端接口。顶部四个数字分别是
-待我审批、进行中的需求、我参与的项目、我负责的项目（我参与含 leader 与成员身份）；下面分「与我有关」（待我审批的申请、我接下的进行中
+待我审批、进行中的需求、我参与的项目、我负责的项目（我参与含所有者、管理员与成员身份）；下面分「与我有关」（待我审批的申请、我接下的进行中
 需求、我负责的项目）和「与我无关」（最近发布的需求、最近被解决的需求、最近新建的项目）
 两组，每组最多 5 条、按时间倒序，标题旁给计数与「查看全部」。
 
 项目详情的可见性：仓库地址（可填多个）与项目说明对登录的开发者开放；开发说明只在项目成员
-（含 leader）的响应里出现，非成员拿到 =null=，页面上也不渲染空字段。leader 在成员区可以按
+（含所有者/管理员）的响应里出现，非成员拿到 =null=，页面上也不渲染空字段。所有者/管理员在成员区可以按
 姓名、用户名、邮箱或用户 ID 搜统一身份目录，直接把对方加入项目（不走申请）。
 
 开发说明支持附件：字节写进集市云对象存储（MinIO， =MINIO_ENDPOINT= / =MINIO_BUCKET= /
@@ -106,7 +106,7 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 
 ** 资格回写
 
-资格写入（Join 方向）：申请通过时写 =is_developer= 为 =true= ；被 leader 移除、退出项目或项目被删除后，
+资格写入（Join 方向）：申请通过时写 =is_developer= 为 =true= ；被所有者/管理员移出、退出项目或项目被删除后，
 若已不属于任何项目则写 =false= 。写入失败不阻塞业务，落在 =developer_qual_sync= 表由后台按
 =QUAL_SYNC_INTERVAL_MS= 重试同一目标值（指数退避，最多 20 次； =400/401/403/404= 视为终态）。
 写入复用 =SSO_CLIENT_ID= / =SSO_CLIENT_SECRET= ，平台侧需把本应用加入
@@ -119,44 +119,54 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 
 ** 列表与详情
 
-- =GET /api/projects= ： =q= 匹配项目标题， =filter= 取 =all= / =mine-leader= / =mine-member= /
+- =GET /api/projects= ： =q= 匹配项目标题， =filter= 取 =all= / =mine-owner= / =mine-member= /
   =recruiting= （有 waiting 需求的项目），按创建时间倒序，分页返回 =items/total/page/pageSize= ，
   每行带 =myRole= 与 =myApplyStatus= 。
-- =GET /api/projects/:id= ：成员按 leader 优先、加入时间排序；需求按 waiting → accepted →
+- =GET /api/projects/:id= ：成员按所有者、管理员、成员排序、加入时间排序；需求按 waiting → accepted →
   completed 排序。返回 =permissions= （ =isMember= / =isLeader= / =canApply= / =canManage= ），
   前端据此决定是否显示「申请加入」与是否显示管理按钮。
 
-** leader 的动作
+** 角色与动作（owner / admin / member）
 
-创建项目 =POST /api/projects= ： =title= 必填且不超过 128 字， =misc= 可选；同一事务里写入
-projects 与一条 =project_member= 记录（ =role= 为 =leader= ），创建者即刻成为 leader。项目始终
-恰好有一个 leader：没有「释放」也不支持转让，leader 要离开只能把整个项目删掉。
+- =owner= 所有者：可以管理项目的一切，包括删除项目、任免所有者；一个项目可以有多个所有者，
+  建项人是「首任所有者」（ =projects.leader_id= ），不能被移除或改角色。
+- =admin= 管理员：可以管理整个项目——编辑项目、审批加入申请、邀请/移出普通成员、验收需求、
+  删除附件；不能删除项目，也不能任免所有者。
+- =member= 成员：发布需求、上传附件、查看开发说明。
 
-- =PATCH /api/projects/:id= ：只有 leader 可改 =title= / =misc= ；没有可更新字段时 400。
-  =misc= 按 Markdown 原样存储，项目详情页渲染；项目列表卡片只显示纯文本摘要。
-- =DELETE /api/projects/:id= ：只有 leader 可删。项目里还有 =accepted= 需求时返回 409
-  =DEMAND_IN_PROGRESS= ；否则在一个事务里删掉 applies、demands、project_member 与 projects，
-  再对每个被移除的成员做一次资格回收（见下）。
-- =DELETE /api/projects/:id/members/:userId= ：移除成员，不能移除 leader 本人。
+创建项目 =POST /api/projects= ： =title= 必填且不超过 128 字， =misc= / =repoUrls= / =devNotes=
+可选；同一事务里写入 projects 与一条 =project_member= 记录（ =role= 为 =owner= ）。
 
-** 成员的退出与被移除
+- =PATCH /api/projects/:id= ：所有者或管理员可改项目的文本与仓库字段。
+- =DELETE /api/projects/:id= ：只有所有者可删。仍有 =accepted= 需求时 409 =DEMAND_IN_PROGRESS= ；
+  否则事务内删掉附件元数据、applies、demands、project_member 与 projects，再清理对象存储里的附件。
+- =POST /api/projects/:id/members= ：邀请成员， =role= 取 =member= 或 =admin= （授予管理员需要所有者）。
+- =PATCH /api/projects/:id/members/:userId= ：调整角色 =owner/admin/member= ，只有所有者可操作；
+  首任所有者不可改。
+- =DELETE /api/projects/:id/members/:userId= ：移除成员。普通成员由所有者或管理员移除；管理员与
+  其他所有者只有所有者能移除；首任所有者不可移除。
 
-=DELETE /api/projects/:id/members/me= 退出项目。leader 不能退出，只能删除项目，否则 409
-=LEADER_CANNOT_LEAVE= 。
+** 成员的退出与被移除**
 
-以上三种「离开项目」（退出、被移除、项目被删除）之后都会调用 =syncAfterRemoval= ：若该用户已不属于
-任何项目，就排一条 =is_developer= 为 =false= 的资格回写。
+=DELETE /api/projects/:id/members/me= 退出项目。所有者不能直接退出（409 =OWNER_CANNOT_LEAVE= ），
+需要先由首任所有者把角色调开；非所有者随时可以退出。
+
+资格变化不会由本平台回写：全局开发者资格由 join 独占（资格写入在 develop 侧已停用）。
 
 ** 拒绝的请求
 
-| 状态 | code                   | 触发条件                                   |
-|------+------------------------+--------------------------------------------|
-|  400 | =BAD_TITLE=            | 标题为空或超过 128 字                      |
-|  400 | =NOTHING_TO_UPDATE=    | PATCH 没有任何可更新字段                   |
-|  403 | =NOT_LEADER=           | 非 leader 改项目、删除项目、移除成员       |
-|  403 | =CANNOT_FIRE_LEADER=   | 移除目标就是 leader                        |
-|  404 | =NOT_FOUND=            | 项目不存在，或目标用户不是项目成员         |
-|  409 | =DEMAND_IN_PROGRESS=   | 项目还有进行中的需求时删除项目             |
+| 状态 | code                      | 触发条件                                   |
+|------+---------------------------+--------------------------------------------|
+|  400 | =BAD_TITLE=               | 标题为空或超过 128 字                      |
+|  400 | =NOTHING_TO_UPDATE=       | PATCH 没有任何可更新字段                   |
+|  400 | =BAD_ROLE=                | 角色不在 owner / admin / member 内         |
+|  403 | =NOT_MANAGER=             | 非所有者/管理员执行管理动作                |
+|  403 | =NOT_OWNER=               | 非所有者删除项目、任免所有者或授予管理员   |
+|  403 | =PRIMARY_OWNER_LOCKED=    | 试图修改首任所有者的角色                   |
+|  403 | =CANNOT_REMOVE_PRIMARY_OWNER= | 试图移除首任所有者                     |
+|  403 | =NOT_PRIMARY_OWNER=       | 非首任所有者调整其他所有者                 |
+|  404 | =NOT_FOUND=               | 项目不存在，或目标用户不是项目成员         |
+|  409 | =DEMAND_IN_PROGRESS=      | 项目还有进行中的需求时删除项目             |
 |  409 | =LEADER_CANNOT_LEAVE=  | leader 直接退出项目                        |
 
 * 四、申请

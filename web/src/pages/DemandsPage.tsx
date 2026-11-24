@@ -113,7 +113,7 @@ export default function DemandsPage() {
         <div>
           <h1 className="page-title">需求</h1>
           <p className="page-sub">
-            项目成员发布的任务。接单人推进完后提交完成，由发布者或项目 leader 验收才算完成；发布者也可以挂起需求。
+            项目成员发布的任务。接单人推进完后提交完成，由发布者或项目所有者/管理员验收才算完成；发布者也可以挂起需求。
           </p>
         </div>
       </div>

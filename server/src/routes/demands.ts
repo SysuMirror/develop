@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loadProject, requireMember } from '../access.ts';
+import { loadMembership, loadProject, requireMember } from '../access.ts';
 import { isDuplicateEntry, one, query, withTx } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
@@ -20,13 +20,37 @@ const SUSPENDABLE: DemandStatus[] = ['waiting', 'accepted', 'review'];
 // 待确认、已完成的需求已经进入验收／结案，改动会让验收对象和记录失真。
 const EDITABLE: DemandStatus[] = ['waiting', 'accepted', 'suspended'];
 
-type Viewer = { id: string; leader: string | null; createdBy: string; assignee: string | null; status: DemandStatus };
+type Viewer = {
+  id: string;
+  createdBy: string;
+  assignee: string | null;
+  status: DemandStatus;
+  projectId: number;
+};
 
-function permissionsOf(viewer: Viewer | null) {
+/** 用户作为所有者/管理员管辖的项目；一次查询，列表里不再逐行打库。 */
+async function managedProjectIds(userId: string): Promise<Set<number>> {
+  const rows = await query<{ project_id: number | string }>(
+    `SELECT p.id AS project_id FROM projects p WHERE p.leader_id = ?
+     UNION
+     SELECT m.project_id FROM project_member m WHERE m.user_id = ? AND m.role IN ('owner','admin')`,
+    [userId, userId],
+  );
+  return new Set(rows.map((row) => Number(row.project_id)));
+}
+
+/** 需求验收/挂起：发布者本人，或项目所有者/管理员。 */
+async function canManageDemand(demand: DemandJoinedRow, userId: string): Promise<boolean> {
+  if (demand.created_by === userId || demand.leader_id === userId) return true;
+  const membership = await loadMembership(demand.project_id, userId);
+  return membership?.role === 'owner' || membership?.role === 'admin';
+}
+
+function permissionsOf(viewer: Viewer | null, managed: Set<number>) {
   if (!viewer) {
     return { canEdit: false, canAccept: false, canSubmit: false, canReview: false, canSuspend: false, canResume: false };
   }
-  const isOwner = viewer.id === viewer.createdBy || viewer.id === viewer.leader;
+  const isOwner = viewer.id === viewer.createdBy || managed.has(viewer.projectId);
   const isAssignee = viewer.assignee !== null && viewer.id === viewer.assignee;
   return {
     canEdit: viewer.id === viewer.createdBy && EDITABLE.includes(viewer.status),
@@ -38,7 +62,12 @@ function permissionsOf(viewer: Viewer | null) {
   };
 }
 
-function mapDemand(row: DemandJoinedRow, people: Map<string, DirectoryUser>, viewerId: string | null) {
+function mapDemand(
+  row: DemandJoinedRow,
+  people: Map<string, DirectoryUser>,
+  viewerId: string | null,
+  managed: Set<number>,
+) {
   return {
     id: row.id,
     title: row.title,
@@ -56,19 +85,20 @@ function mapDemand(row: DemandJoinedRow, people: Map<string, DirectoryUser>, vie
       viewerId
         ? {
             id: viewerId,
-            leader: row.leader_id,
             createdBy: row.created_by,
             assignee: row.user_id,
             status: row.status,
+            projectId: row.project_id,
           }
         : null,
+      managed,
     ),
   };
 }
 
-async function mapDemands(rows: DemandJoinedRow[], viewerId: string | null = null) {
+async function mapDemands(rows: DemandJoinedRow[], viewerId: string | null = null, managed = new Set<number>()) {
   const people = await getUsers(rows.flatMap((row) => [row.created_by, row.user_id]));
-  return rows.map((row) => mapDemand(row, people, viewerId));
+  return rows.map((row) => mapDemand(row, people, viewerId, managed));
 }
 
 async function loadJoinedDemand(id: number): Promise<DemandJoinedRow> {
@@ -77,12 +107,9 @@ async function loadJoinedDemand(id: number): Promise<DemandJoinedRow> {
   return demand;
 }
 
-function isOwner(demand: DemandJoinedRow, userId: string): boolean {
-  return demand.created_by === userId || demand.leader_id === userId;
-}
-
 async function respond(res: import('express').Response, id: number, viewerId: string) {
-  res.json((await mapDemands([await loadJoinedDemand(id)], viewerId))[0]);
+  const managed = await managedProjectIds(viewerId);
+  res.json((await mapDemands([await loadJoinedDemand(id)], viewerId, managed))[0]);
 }
 
 router.get(
@@ -119,7 +146,7 @@ router.get(
       params,
     );
     res.json({
-      items: await mapDemands(rows, user?.id ?? null),
+      items: await mapDemands(rows, user?.id ?? null, user ? await managedProjectIds(user.id) : new Set<number>()),
       total: Number(counted?.total ?? 0),
       page,
       pageSize,
@@ -131,7 +158,10 @@ router.get(
   '/demands/:id',
   wrap(async (req, res) => {
     const demand = await loadJoinedDemand(Number(req.params.id));
-    res.json((await mapDemands([demand], req.user?.id ?? null))[0]);
+    const user = req.user;
+    res.json(
+      (await mapDemands([demand], user?.id ?? null, user ? await managedProjectIds(user.id) : new Set<number>()))[0],
+    );
   }),
 );
 
@@ -286,7 +316,7 @@ router.post(
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const demand = await loadJoinedDemand(Number(req.params.id));
-    if (!isOwner(demand, user.id)) throw forbidden('NOT_REVIEWER', '只有发布者或项目 leader 可以验收');
+    if (!(await canManageDemand(demand, user.id))) throw forbidden('NOT_REVIEWER', '只有发布者或项目所有者/管理员可以验收');
     if (demand.status !== 'review') throw conflict('NOT_IN_REVIEW', '只有待确认的需求可以验收');
     await query("UPDATE demands SET status = 'completed', completed_at = NOW() WHERE id = ? AND status = 'review'", [
       demand.id,
@@ -302,7 +332,7 @@ router.post(
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const demand = await loadJoinedDemand(Number(req.params.id));
-    if (!isOwner(demand, user.id)) throw forbidden('NOT_REVIEWER', '只有发布者或项目 leader 可以驳回');
+    if (!(await canManageDemand(demand, user.id))) throw forbidden('NOT_REVIEWER', '只有发布者或项目所有者/管理员可以驳回');
     if (demand.status !== 'review') throw conflict('NOT_IN_REVIEW', '只有待确认的需求可以驳回');
     await query("UPDATE demands SET status = 'accepted', submitted_at = NULL WHERE id = ? AND status = 'review'", [
       demand.id,
@@ -317,7 +347,7 @@ router.post(
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const demand = await loadJoinedDemand(Number(req.params.id));
-    if (!isOwner(demand, user.id)) throw forbidden('NOT_REVIEWER', '只有发布者或项目 leader 可以挂起');
+    if (!(await canManageDemand(demand, user.id))) throw forbidden('NOT_REVIEWER', '只有发布者或项目所有者/管理员可以挂起');
     if (!SUSPENDABLE.includes(demand.status)) throw conflict('CANNOT_SUSPEND', '当前状态不能挂起');
     await query("UPDATE demands SET status = 'suspended', status_before_suspend = ? WHERE id = ? AND status = ?", [
       demand.status,
@@ -334,7 +364,7 @@ router.post(
     const user = req.user;
     if (!user) throw forbidden('NOT_MEMBER', '请先登录');
     const demand = await loadJoinedDemand(Number(req.params.id));
-    if (!isOwner(demand, user.id)) throw forbidden('NOT_REVIEWER', '只有发布者或项目 leader 可以恢复');
+    if (!(await canManageDemand(demand, user.id))) throw forbidden('NOT_REVIEWER', '只有发布者或项目所有者/管理员可以恢复');
     if (demand.status !== 'suspended') throw conflict('NOT_SUSPENDED', '只有挂起的需求可以恢复');
     const back = demand.status_before_suspend ?? 'waiting';
     await query('UPDATE demands SET status = ?, status_before_suspend = NULL WHERE id = ? AND status = \'suspended\'', [

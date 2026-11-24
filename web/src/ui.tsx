@@ -26,12 +26,14 @@ export const DEMAND_STATUS: Record<DemandStatus, StatusMeta> = {
 };
 
 export const ROLE: Record<Role, StatusMeta> = {
-  leader: { label: 'Leader', tone: 'blue' },
-  participant: { label: '成员', tone: 'gray' },
+  owner: { label: '所有者', tone: 'blue' },
+  admin: { label: '管理员', tone: 'amber' },
+  member: { label: '成员', tone: 'gray' },
 };
 
 export const APPLY_TYPE: Record<ApplyType, StatusMeta> = {
-  leader: { label: '申请当 Leader', tone: 'blue' },
+  // 历史数据里还有 leader 型申请（已不再受理），保留映射避免显示空白。
+  leader: { label: '申请当所有者（历史）', tone: 'blue' },
   participant: { label: '申请加入', tone: 'gray' },
 };
 

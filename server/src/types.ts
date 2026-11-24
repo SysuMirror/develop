@@ -1,7 +1,7 @@
 // 服务端共享类型：数据库行的形状、目录里的人、会话用户。
 // 约定：DB 行用 snake_case（与 SELECT 出来的列一致），对外 JSON 的映射函数负责转 camelCase。
 
-export type Role = 'leader' | 'participant';
+export type Role = 'owner' | 'admin' | 'member';
 export type ApplyType = 'leader' | 'participant';
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type ApplySource = 'web' | 'join';
