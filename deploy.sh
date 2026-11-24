@@ -11,6 +11,25 @@ mkdir -p "$DATA_DIR"
 export DATA_DIR
 export PORT
 
+# —— 运行时密钥：持久盘上的 develop.env（600，不入仓库、不随 pod 重建丢失）——
+# 内容：MYSQL_HOST/PORT/USER/PASSWORD/DB、SSO_ISSUER/CLIENT_ID/CLIENT_SECRET/REDIRECT_URI/SCOPE、DEV_LOGIN
+# 平台注入的同名环境变量优先；这里只补缺。
+SECRETS_FILE="${DATA_DIR}/develop.env"
+if [ -f "$SECRETS_FILE" ]; then
+  while IFS='=' read -r key value; do
+    case "$key" in ''|\#*) continue ;; esac
+    if [ -z "${!key:-}" ]; then export "$key=$value"; fi
+  done < "$SECRETS_FILE"
+  echo "[deploy] secrets: $SECRETS_FILE（已补缺 MYSQL_*/SSO_*）"
+else
+  echo "[deploy] WARN: $SECRETS_FILE 不存在，MySQL 与 UniSSO 可能不可用" >&2
+fi
+
+# 配好 UniSSO 后生产默认关闭演示登录；本地/无凭据场景不受影响
+if [ -n "${SSO_CLIENT_ID:-}" ]; then
+  export DEV_LOGIN="${DEV_LOGIN:-0}"
+fi
+
 # 构建阶段禁止 production，否则 npm 跳过 devDependencies（tsc/vite）
 # 若平台注入了 NODE_ENV=production，这里先清掉
 unset NODE_ENV || true
@@ -34,23 +53,19 @@ if [ -z "${JWT_SECRET:-}" ]; then
   exit 1
 fi
 
-# 集市 OAuth（oauth2_apps.app_id=sse-developer 对齐；模块 env 可覆盖；secret 必须平台注入）
+# 集市 OAuth 为历史变量（新 develop 只认 UniSSO），保留兼容旧面板注入，不再强制要求
 export SSEAPI_OAUTH_BASE_URL="${SSEAPI_OAUTH_BASE_URL:-https://ssemarket.cn/new}"
 export SSEAPI_OAUTH_API_BASE_URL="${SSEAPI_OAUTH_API_BASE_URL:-https://ssemarket.cn}"
 export SSEAPI_OAUTH_APP_ID="${SSEAPI_OAUTH_APP_ID:-${OAUTH_APP_ID:-sse-developer}}"
-if [ -z "${SSEAPI_OAUTH_APP_SECRET:-${OAUTH_APP_SECRET:-}}" ]; then
-  echo "[deploy] FATAL: SSEAPI_OAUTH_APP_SECRET 未注入（请在部署平台环境变量中配置）" >&2
-  exit 1
-fi
 export SSEAPI_OAUTH_APP_SECRET="${SSEAPI_OAUTH_APP_SECRET:-${OAUTH_APP_SECRET:-}}"
 export SSEAPI_OAUTH_REDIRECT_URI="${SSEAPI_OAUTH_REDIRECT_URI:-${OAUTH_REDIRECT_URI:-https://develop.ssemarket.cn/oauth/callback}}"
 export SSEAPI_OAUTH_AUTHORIZE_PATH="${SSEAPI_OAUTH_AUTHORIZE_PATH:-/connect}"
 export SSEAPI_OAUTH_SCOPE="${SSEAPI_OAUTH_SCOPE:-read_basic}"
 
 echo "[deploy] PORT=$PORT DATA_DIR=$DATA_DIR"
-echo "[deploy] PUBLIC_BASE=$PUBLIC_BASE (developer platform)"
-echo "[deploy] SSEAPI_API_PUBLIC_URL=$SSEAPI_API_PUBLIC_URL (api portal link)"
-echo "[deploy] OAuth app_id=$SSEAPI_OAUTH_APP_ID redirect=$SSEAPI_OAUTH_REDIRECT_URI"
+echo "[deploy] PUBLIC_BASE=$PUBLIC_BASE"
+echo "[deploy] unisso=${SSO_ISSUER:-未配置} client=${SSO_CLIENT_ID:-未配置} dev_login=${DEV_LOGIN:-<unset>}"
+echo "[deploy] mysql=${MYSQL_HOST:-未配置}/${MYSQL_DB:-未配置} user=${MYSQL_USER:+已配置}"
 if [ -n "${MINIO_ENDPOINT:-}" ] && [ -n "${MINIO_BUCKET:-}" ]; then
   echo "[deploy] store=minio:${MINIO_BUCKET} (local backup under DATA_DIR)"
 else
