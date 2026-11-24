@@ -88,26 +88,52 @@ npm_ci_or_install() {
   fi
 }
 
+# dist 缺失、或任一源码/配置比 dist 新 → 需要重新构建。
+# 这样“push 后自动部署”就能真正把新代码编译进产物，而不是只重启旧 dist。
+is_stale() {
+  local marker="$1"; shift
+  [ ! -f "$marker" ] && return 0
+  local path
+  for path in "$@"; do
+    [ -e "$path" ] || continue
+    if [ -n "$(find "$path" -newer "$marker" -print -quit 2>/dev/null)" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # —— server ——
 if [ -f server/package.json ]; then
-  if [ ! -f server/dist/index.js ]; then
-    echo "[deploy] building server (dist missing)…"
-    cd server
-    npm_ci_or_install
-    npm run build
-    cd "$ROOT"
+  cd server
+  if is_stale dist/index.js src package.json package-lock.json tsconfig.json; then
+    echo "[deploy] server 源码有更新，重新编译…"
+    npm_ci_or_install >/dev/null 2>&1 || npm install --include=dev >/dev/null 2>&1 || true
+    if [ ! -f node_modules/typescript/bin/tsc ]; then
+      npm install --no-save --no-audit --no-fund typescript@5.9.3 @types/node@22 @types/express@4 >/dev/null 2>&1 || true
+    fi
+    rm -rf dist.new
+    if [ -f node_modules/typescript/bin/tsc ] \
+       && node node_modules/typescript/bin/tsc -p tsconfig.json --outDir dist.new \
+       && cp src/schema.sql dist.new/schema.sql; then
+      rm -rf dist.old
+      mv dist dist.old 2>/dev/null || true
+      mv dist.new dist
+      rm -rf dist.old
+      echo "[deploy] server 编译完成"
+    else
+      rm -rf dist.new
+      echo "[deploy] WARN: server 编译失败，继续使用旧 dist（服务不中断）" >&2
+    fi
   else
-    echo "[deploy] server/dist 已存在，跳过 tsc；仅安装生产依赖"
-    cd server
-    npm ci --omit=dev 2>/dev/null || npm install --omit=dev
-    cd "$ROOT"
+    echo "[deploy] server 无需重新编译"
   fi
-  if [ ! -f server/dist/index.js ]; then
-    echo "[deploy] FATAL: server/dist/index.js 不存在（tsc 未产出）。请检查 zip 是否含 server/src" >&2
-    ls -la server/src 2>&1 | head -20 >&2 || true
-    ls -la server/dist 2>&1 | head -20 >&2 || true
+  if [ ! -f dist/index.js ]; then
+    echo "[deploy] FATAL: server/dist/index.js 不存在且无法编译" >&2
     exit 1
   fi
+  npm ci --omit=dev 2>/dev/null || npm install --omit=dev 2>/dev/null || true
+  cd "$ROOT"
   echo "[deploy] server OK: server/dist/index.js"
 fi
 
@@ -115,15 +141,26 @@ fi
 if [ -f web/package.json ]; then
   export VITE_BASE_PATH="/"
   export VITE_API_BASE=""
-  if [ ! -f web/dist/index.html ]; then
-    echo "[deploy] building web…"
-    cd web
-    npm_ci_or_install
-    npm run build
-    cd "$ROOT"
+  cd web
+  if is_stale dist/index.html src package.json package-lock.json tsconfig.json vite.config.ts index.html; then
+    echo "[deploy] web 源码有更新，重新构建…"
+    npm_ci_or_install >/dev/null 2>&1 || npm install --include=dev >/dev/null 2>&1 || true
+    rm -rf dist.new
+    if [ -f node_modules/vite/bin/vite.js ] \
+       && VITE_BASE_PATH=/ VITE_API_BASE= node node_modules/vite/bin/vite.js build --outDir dist.new --emptyOutDir >/dev/null 2>&1; then
+      rm -rf dist.old
+      mv dist dist.old 2>/dev/null || true
+      mv dist.new dist
+      rm -rf dist.old
+      echo "[deploy] web 构建完成"
+    else
+      rm -rf dist.new
+      echo "[deploy] WARN: web 构建失败，继续使用旧 dist" >&2
+    fi
   else
-    echo "[deploy] web/dist 已存在，跳过 vite build"
+    echo "[deploy] web 无需重新构建"
   fi
+  cd "$ROOT"
   if [ ! -f web/dist/index.html ]; then
     echo "[deploy] FATAL: web/dist/index.html 不存在" >&2
     exit 1
@@ -135,5 +172,9 @@ export SSEAPI_FRONTEND_DIST="${SSEAPI_FRONTEND_DIST:-$ROOT/web/dist}"
 
 export NODE_ENV=production
 cd server
+# 迁移随部署自动执行（幂等）；失败只告警，不阻塞启动（旧表仍可服务）。
+if [ -f dist/migrate.js ]; then
+  "$NODE_BIN" dist/migrate.js || echo "[deploy] WARN: 数据库迁移失败，请手动检查" >&2
+fi
 echo "[deploy] starting node dist/index.js"
 exec "$NODE_BIN" dist/index.js
