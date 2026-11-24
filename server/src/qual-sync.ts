@@ -39,6 +39,9 @@ function backoffMs(attempts: number, retryAfterMs = 0): number {
 
 export async function enqueueQualification(userId: string | null | undefined, targetValue: boolean): Promise<void> {
   if (!userId) return;
+  // 资格写入唯一责任人 = join（UniSSO 侧只把 join 的 client 列进写白名单）。
+  // 本平台不再入队，避免「join 授予 / develop 撤销」互相覆盖。
+  if (!qualificationWriteEnabled()) return;
   await query(
     `INSERT INTO developer_qual_sync (user_id, target_value, status, attempts, last_error, next_attempt_at)
      VALUES (?, ?, 'pending', 0, NULL, NOW())

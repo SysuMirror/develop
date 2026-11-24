@@ -8,7 +8,6 @@ import * as auth from './auth.ts';
 import { parseCookies, wrap } from './http.ts';
 import { pool } from './db.ts';
 import { warm as warmDirectory } from './directory.ts';
-import { startQualSyncWorker } from './qual-sync.ts';
 import appliesRouter from './routes/applies.ts';
 import demandsRouter from './routes/demands.ts';
 import joinRouter from './routes/join.ts';
@@ -121,5 +120,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
   // 目录预热在后台跑，失败也不会影响启动；请求路径永远不等待它。
   warmDirectory();
-  startQualSyncWorker();
+  // 全局开发者资格的唯一写入方是 join（UniSSO 白名单只放行 join 的 client）；
+  // 本平台只读资格、按项目成员做业务权限，不再回写 is_developer。
 }

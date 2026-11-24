@@ -7,7 +7,9 @@ const CLIENT_SECRET = process.env.SSO_CLIENT_SECRET || '';
 const TIMEOUT_MS = Number(process.env.SSO_WRITE_TIMEOUT_MS || 5000);
 
 export function qualificationWriteEnabled(): boolean {
-  return Boolean(CLIENT_ID && CLIENT_SECRET);
+  // 全局开发者资格由 join 独占写入（UniSSO 的写白名单只放行 join 的 client_id）。
+  // 本平台只读资格，不再尝试回写，避免两边规则互相覆盖。
+  return false;
 }
 
 export interface QualificationErrorOptions {
