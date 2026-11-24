@@ -15,6 +15,13 @@ export PORT
 # 若平台注入了 NODE_ENV=production，这里先清掉
 unset NODE_ENV || true
 
+# --- runtime baseline: image node18 cannot run this ESM build; pin shared node22 ---
+NODE_BIN=/shared/opt/node/22.23.3/bin/node
+[ -x "$NODE_BIN" ] || NODE_BIN="$(command -v node)"
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+# npm via mirror (direct npmjs is blocked by the egress proxy with 407)
+export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}"
+
 # develop 平台：站点主域 develop.ssemarket.cn（模块 API 与站点同源，不再使用 developer-api 子域）
 export PUBLIC_BASE="${PUBLIC_BASE:-${SDPY_PUBLIC_URL:-https://develop.ssemarket.cn}}"
 export SSEAPI_API_PUBLIC_URL="${SSEAPI_API_PUBLIC_URL:-${SDPY_API_PUBLIC_URL:-https://develop.ssemarket.cn}}"
@@ -114,4 +121,4 @@ export SSEAPI_FRONTEND_DIST="${SSEAPI_FRONTEND_DIST:-$ROOT/web/dist}"
 export NODE_ENV=production
 cd server
 echo "[deploy] starting node dist/index.js"
-exec node dist/index.js
+exec "$NODE_BIN" dist/index.js
