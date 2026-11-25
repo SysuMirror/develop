@@ -86,6 +86,8 @@ export interface ProjectPermissions {
   isMember: boolean;
   role: Role | null;
   isOwner: boolean;
+  /** 首任所有者（建项人）：只有它能任免其他所有者。 */
+  isPrimaryOwner: boolean;
   /** 所有者或管理员：可编辑项目、审批申请、邀请/移出成员。 */
   isAdmin: boolean;
   canApply: boolean;

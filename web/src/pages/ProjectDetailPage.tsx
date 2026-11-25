@@ -94,6 +94,7 @@ export default function ProjectDetailPage() {
 
   const permissions = data.permissions;
   const isOwner = permissions.isOwner;
+  const isPrimaryOwner = permissions.isPrimaryOwner;
   const isAdmin = permissions.isAdmin;
   const isMember = permissions.isMember;
   const canAcceptApply = isAdmin;
@@ -290,7 +291,10 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
               {member.isPrimary ? <Badge tone="blue">首任</Badge> : null}
-              {isOwner && !member.isPrimary && member.userId !== myId ? (
+              {isOwner &&
+              !member.isPrimary &&
+              member.userId !== myId &&
+              (member.role !== 'owner' || isPrimaryOwner) ? (
                 <select
                   className="input"
                   style={{ width: 110, padding: '4px 8px' }}
@@ -307,7 +311,7 @@ export default function ProjectDetailPage() {
               {isAdmin &&
               !member.isPrimary &&
               member.userId !== myId &&
-              (isOwner || member.role === 'member') ? (
+              (isOwner ? member.role !== 'owner' || isPrimaryOwner : member.role === 'member') ? (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm btn-danger"

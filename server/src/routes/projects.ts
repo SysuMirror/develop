@@ -300,6 +300,8 @@ router.get(
         role,
         isOwner: role === 'owner',
         isAdmin: role === 'owner' || role === 'admin',
+        // 首任所有者：只有它能任免其他所有者、调整所有者角色。
+        isPrimaryOwner: role === 'owner' && project.leader_id === user.id,
         canApply: !role,
         canManage: role === 'owner' || role === 'admin',
         canDelete: role === 'owner',
