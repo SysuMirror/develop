@@ -88,44 +88,45 @@ export default function ProjectsPage() {
     content = <Empty title="没有匹配的项目" hint="换个筛选条件，或者自己建一个。" />;
   } else {
     content = (
-      <div className="project-grid">
+      <div className="project-list">
         {items.map((project) => {
           const desc = excerptOf(project.misc);
           const canApply = !project.myRole;
           const waitingApply = canApply && project.myApplyStatus === 'waiting';
           return (
-            <div className="project-card" key={project.id}>
-              <div className="project-card__top">
-                <Link className="project-card__title stretched truncate" to={`/projects/${project.id}`}>
-                  {project.title}
-                </Link>
-                <span className="row" style={{ gap: 4, flexShrink: 0 }}>
+            <div className="project-row" key={project.id}>
+              <div className="project-row__main">
+                <div className="project-row__titleline">
+                  <Link className="project-row__title stretched" to={`/projects/${project.id}`}>
+                    {project.title}
+                  </Link>
                   {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
                   <StatusBadge map={PROJECT_STATUS} value={project.status} />
                   <StatusBadge map={PROJECT_DIFFICULTY} value={project.difficulty} />
+                  <TechChips items={project.techStack} />
+                </div>
+                <p className="project-row__desc">{desc || '这个项目还没有写说明。'}</p>
+              </div>
+
+              <div className="project-row__meta">
+                <span className="project-card__owner">
+                  <Avatar name={project.owner?.name ?? undefined} src={project.owner?.avatar ?? undefined} size="sm" />
+                  {project.owner?.name ?? '—'}
+                </span>
+                <span>{project.memberCount} 人</span>
+                {project.waitingDemandCount > 0 ? (
+                  <Badge tone="amber">{project.waitingDemandCount} 个待接</Badge>
+                ) : null}
+                <span className="faint">
+                  <TimeAgo value={project.updatedAt} />
                 </span>
               </div>
 
-              <p className="project-card__desc">{desc || '这个项目还没有写说明。'}</p>
-
-              <div className="project-card__foot">
-                <TechChips items={project.techStack} />
-                <span className="project-card__meta">
-                  <Avatar name={project.owner?.name ?? undefined} src={project.owner?.avatar ?? undefined} size="sm" />
-                  {project.owner?.name ?? '—'} · {project.memberCount} 人
-                  {project.waitingDemandCount > 0 ? (
-                    <Badge tone="amber">{project.waitingDemandCount} 个待接</Badge>
-                  ) : null}
-                  <span className="faint">
-                    <TimeAgo value={project.updatedAt} />
-                  </span>
-                </span>
+              <div className="project-row__action">
                 {waitingApply ? (
-                  <span className="project-card__action">
-                    <Badge tone="blue">申请等待审批</Badge>
-                  </span>
+                  <Badge tone="blue">申请等待审批</Badge>
                 ) : canApply ? (
-                  <Link className="btn btn-primary btn-sm project-card__action" to={`/projects/${project.id}/apply`}>
+                  <Link className="btn btn-primary btn-sm" to={`/projects/${project.id}/apply`}>
                     申请加入
                   </Link>
                 ) : null}
