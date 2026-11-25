@@ -1,12 +1,12 @@
 // 项目附件：字节存集市云对象存储（MinIO），MySQL 只存元数据。
-// 权限与“开发说明”一致：项目成员可见、可上传；删除限上传者本人或 leader。
+// 权限与“开发说明”一致：项目成员可见、可上传；删除限上传者本人，或项目所有者/管理员。
 
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Router } from 'express';
 import type { RowDataPacket } from 'mysql2/promise';
-import { loadMembership, loadProject } from '../access.ts';
+import { loadMembership, loadProject, roleOf } from '../access.ts';
 import { execute, query } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { ApiError, badRequest, forbidden, notFound, wrap } from '../http.ts';
@@ -184,8 +184,12 @@ router.delete(
       project.id,
     ]);
     if (!row) throw notFound('附件不存在');
-    if (row.uploaded_by !== user.id && project.leader_id !== user.id) {
-      throw forbidden('NOT_ALLOWED', '只有上传者本人或项目 leader 可以删除附件');
+    if (row.uploaded_by !== user.id) {
+      // 与前端一致：所有者与管理员都能清理附件，不只是首任所有者。
+      const role = await roleOf(project, user.id);
+      if (role !== 'owner' && role !== 'admin') {
+        throw forbidden('NOT_ALLOWED', '只有上传者本人或项目所有者/管理员可以删除附件');
+      }
     }
     if (storageConfigured()) {
       try {
