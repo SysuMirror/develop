@@ -182,8 +182,9 @@ router.get(
     const filterParams: unknown[] = [];
     if (term) {
       // 搜索同时命中名称、说明与技术栈：列表只有一个搜索框，用户不该猜字段。
+      // 技术栈是 JSON 列，转成字符串再 LIKE 才会按排序规则忽略大小写（JSON_SEARCH 区分大小写）。
       conditions.push(
-        "(p.title LIKE ? OR p.misc LIKE ? OR JSON_SEARCH(COALESCE(p.tech_stack, JSON_ARRAY()), 'one', ?) IS NOT NULL)",
+        '(p.title LIKE ? OR p.misc LIKE ? OR CAST(COALESCE(p.tech_stack, JSON_ARRAY()) AS CHAR) LIKE ?)',
       );
       filterParams.push(term, term, term);
     }

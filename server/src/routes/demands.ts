@@ -218,9 +218,9 @@ router.get(
       params.push(user.id);
     }
     if (term) {
-      // 与项目列表一致：一个搜索框命中标题、详情与标签。
+      // 与项目列表一致：一个搜索框命中标题、详情与标签；标签列转字符串再 LIKE，忽略大小写。
       conditions.push(
-        "(d.title LIKE ? OR d.detail LIKE ? OR JSON_SEARCH(COALESCE(d.labels, JSON_ARRAY()), 'one', ?) IS NOT NULL)",
+        '(d.title LIKE ? OR d.detail LIKE ? OR CAST(COALESCE(d.labels, JSON_ARRAY()) AS CHAR) LIKE ?)',
       );
       params.push(term, term, term);
     }
