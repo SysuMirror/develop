@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import { qs } from '../api';
 import { useApi, useDebounced } from '../hooks';
 import {
-  APPLY_STATUS,
   PROJECT_DIFFICULTY,
   PROJECT_STATUS,
   ROLE,
@@ -92,14 +91,16 @@ export default function ProjectsPage() {
       <div className="project-grid">
         {items.map((project) => {
           const desc = excerptOf(project.misc);
+          const canApply = !project.myRole;
+          const waitingApply = canApply && project.myApplyStatus === 'waiting';
           return (
-            <Link className="project-card" key={project.id} to={`/projects/${project.id}`}>
+            <div className="project-card" key={project.id}>
               <div className="project-card__top">
-                <span className="row" style={{ gap: 6, alignItems: 'center', minWidth: 0 }}>
-                  <span className="project-card__title truncate">{project.title}</span>
-                  {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
-                </span>
+                <Link className="project-card__title stretched truncate" to={`/projects/${project.id}`}>
+                  {project.title}
+                </Link>
                 <span className="row" style={{ gap: 4, flexShrink: 0 }}>
+                  {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
                   <StatusBadge map={PROJECT_STATUS} value={project.status} />
                   <StatusBadge map={PROJECT_DIFFICULTY} value={project.difficulty} />
                 </span>
@@ -107,29 +108,29 @@ export default function ProjectsPage() {
 
               <p className="project-card__desc">{desc || '这个项目还没有写说明。'}</p>
 
-              <TechChips items={project.techStack} />
-
-              <div className="project-card__meta">
-                <span className="project-card__owner">
+              <div className="project-card__foot">
+                <TechChips items={project.techStack} />
+                <span className="project-card__meta">
                   <Avatar name={project.owner?.name ?? undefined} src={project.owner?.avatar ?? undefined} size="sm" />
-                  {project.owner?.name ?? '—'}
-                </span>
-                <span>{project.memberCount} 位成员</span>
-                <span>
+                  {project.owner?.name ?? '—'} · {project.memberCount} 人
                   {project.waitingDemandCount > 0 ? (
-                    <Badge tone="amber">{project.waitingDemandCount} 个待接需求</Badge>
-                  ) : (
-                    '暂无待接需求'
-                  )}
+                    <Badge tone="amber">{project.waitingDemandCount} 个待接</Badge>
+                  ) : null}
+                  <span className="faint">
+                    <TimeAgo value={project.updatedAt} />
+                  </span>
                 </span>
-                {!project.myRole && project.myApplyStatus ? (
-                  <StatusBadge map={APPLY_STATUS} value={project.myApplyStatus} />
+                {waitingApply ? (
+                  <span className="project-card__action">
+                    <Badge tone="blue">申请等待审批</Badge>
+                  </span>
+                ) : canApply ? (
+                  <Link className="btn btn-primary btn-sm project-card__action" to={`/projects/${project.id}/apply`}>
+                    申请加入
+                  </Link>
                 ) : null}
-                <span className="faint">
-                  <TimeAgo value={project.updatedAt} />
-                </span>
               </div>
-            </Link>
+            </div>
           );
         })}
       </div>

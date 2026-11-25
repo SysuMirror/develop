@@ -2024,3 +2024,48 @@ button {
   align-items: center;
   gap: 6px;
 }
+
+/* 项目卡片紧凑版：一行标题+状态、两行说明、一行「技术栈 + 元信息 + 申请」 */
+.project-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+.project-card {
+  position: relative;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.project-card__top {
+  align-items: center;
+}
+.project-card__title {
+  display: block;
+  min-width: 0;
+}
+.project-card__title.stretched::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.project-card__desc {
+  min-height: 36px;
+}
+.project-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.project-card__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.project-card__action {
+  position: relative;
+  z-index: 1;
+  margin-left: auto;
+}
