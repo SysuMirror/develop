@@ -101,7 +101,7 @@ export default function LoginPage() {
           <>
             <div className="section-head auth-dev-head">
               <h2>开发身份模拟</h2>
-              <span className="faint">DEV_LOGIN 开启时可用</span>
+              <span className="faint">仅开发环境可用</span>
             </div>
             <div className="list">
               {identities.map((item) => (
