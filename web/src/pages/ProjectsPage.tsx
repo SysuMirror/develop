@@ -1,56 +1,46 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { qs } from '../api';
 import { useApi, useDebounced } from '../hooks';
 import {
-  PROJECT_DIFFICULTY,
-  PROJECT_STATUS,
-  ROLE,
-  Avatar,
-  Badge,
-  Empty,
-  Pager,
-  Skeleton,
-  StatusBadge,
-  TimeAgo,
-} from '../ui';
-import type { Paged, ProjectSummary } from '../types';
+  FilterBar,
+  FilterField,
+  FilterToggle,
+  MobileFilters,
+  SearchField,
+  Segmented,
+  SelectField,
+  useMediaQuery,
+} from '../filters';
+import { PROJECT_DIFFICULTY, PROJECT_STATUS, Pager, ROLE, StatusBadge, TimeAgo, displayName } from '../ui';
+import type { Option } from '../filters';
+import type { Paged, ProjectDifficulty, ProjectStatus, ProjectSummary } from '../types';
 
-interface FilterItem {
-  key: string;
-  label: string;
-}
-
-const FILTERS: FilterItem[] = [
-  { key: 'all', label: '全部' },
-  { key: 'mine-owner', label: '我负责的' },
-  { key: 'mine-member', label: '我参与的' },
-  { key: 'recruiting', label: '招募中' },
+const SCOPES: Option[] = [
+  { value: 'all', label: '全部' },
+  { value: 'mine-owner', label: '我负责的' },
+  { value: 'mine-member', label: '我参与的' },
+  { value: 'recruiting', label: '招募中' },
 ];
 
-const STATUS_FILTERS: FilterItem[] = [
-  { key: '', label: '全部状态' },
-  { key: 'recruiting', label: '招募中' },
-  { key: 'active', label: '进行中' },
-  { key: 'paused', label: '暂停' },
-  { key: 'archived', label: '已归档' },
+const STATUS_OPTIONS: Option[] = [
+  { value: '', label: '全部状态' },
+  ...(Object.entries(PROJECT_STATUS) as [ProjectStatus, { label: string }][]).map(([value, meta]) => ({
+    value,
+    label: meta.label,
+  })),
 ];
 
-function TechChips({ items }: { items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <span className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-      {items.slice(0, 5).map((tech) => (
-        <Badge key={tech} tone="gray">
-          {tech}
-        </Badge>
-      ))}
-    </span>
-  );
-}
+const DIFFICULTY_OPTIONS: Option[] = [
+  { value: '', label: '全部难度' },
+  ...(Object.entries(PROJECT_DIFFICULTY) as [ProjectDifficulty, { label: string }][]).map(([value, meta]) => ({
+    value,
+    label: meta.label,
+  })),
+];
 
-/** 把 Markdown 说明压成一行纯文本摘要，让列表自带上下文。 */
+/** 把 Markdown 说明压成纯文本摘要，让列表自带上下文。 */
 function excerptOf(text: string | null): string {
   if (!text) return '';
   return text
@@ -64,77 +54,148 @@ function excerptOf(text: string | null): string {
 }
 
 export default function ProjectsPage() {
-  const [filter, setFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [tech, setTech] = useState('');
+  // 概览页会带着 ?filter= / ?status= 跳过来，首屏要按链接里的条件渲染；
+  // 之后改筛选再把条件写回地址栏，刷新和分享都能还原。
+  const [params, setParams] = useSearchParams();
+  const [scope, setScope] = useState(() => params.get('filter') || 'all');
+  const [status, setStatus] = useState(() => params.get('status') || '');
+  const [difficulty, setDifficulty] = useState(() => params.get('difficulty') || '');
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
+  const [sheet, setSheet] = useState(false);
   const q = useDebounced(term);
-  const techQ = useDebounced(tech);
+  const narrow = useMediaQuery('(max-width: 720px)');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search);
+    const entries: [string, string][] = [
+      ['filter', scope === 'all' ? '' : scope],
+      ['status', status],
+      ['difficulty', difficulty],
+    ];
+    for (const [key, value] of entries) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    if (next.toString() !== window.location.search.replace(/^\?/, '')) {
+      setParams(next, { replace: true });
+    }
+  }, [scope, status, difficulty, setParams]);
 
   const pageSize = 12;
   const { data, loading, error } = useApi<Paged<ProjectSummary>>(
-    `/projects${qs({ filter, status: statusFilter, tech: techQ, q, page, pageSize })}`,
+    `/projects${qs({ filter: scope, status, difficulty, q, page, pageSize })}`,
   );
   const items = data?.items ?? [];
+  const extraFilters = (status ? 1 : 0) + (difficulty ? 1 : 0);
+
+  function resetExtra() {
+    setStatus('');
+    setDifficulty('');
+    setPage(1);
+  }
+
+  const statusSelect = (
+    <SelectField
+      label="按状态筛选"
+      value={status}
+      options={STATUS_OPTIONS}
+      onChange={(value) => {
+        setStatus(value);
+        setPage(1);
+      }}
+    />
+  );
+  const difficultySelect = (
+    <SelectField
+      label="按难度筛选"
+      value={difficulty}
+      options={DIFFICULTY_OPTIONS}
+      onChange={(value) => {
+        setDifficulty(value);
+        setPage(1);
+      }}
+    />
+  );
 
   let content: ReactNode;
   if (loading) {
-    content = <Skeleton rows={5} />;
+    content = (
+      <div className="project-list">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div className="project-row project-row--skeleton" key={index}>
+            <div className="skeleton-row" />
+          </div>
+        ))}
+      </div>
+    );
   } else if (error) {
     content = <div className="notice notice-error">{error.message}</div>;
   } else if (items.length === 0) {
-    content = <Empty title="没有匹配的项目" hint="换个筛选条件，或者自己建一个。" />;
+    content = (
+      <div className="empty">
+        <strong>{term ? '没有匹配的项目' : '这里还没有项目'}</strong>
+        {term ? '换个关键词，或清空筛选再看。' : '第一个项目可以从你的想法开始。'}
+      </div>
+    );
   } else {
     content = (
-      <div className="project-list">
+      <ul className="project-list">
         {items.map((project) => {
           const desc = excerptOf(project.misc);
-          const canApply = !project.myRole;
-          const waitingApply = canApply && project.myApplyStatus === 'waiting';
+          const href = `/projects/${project.id}`;
           return (
-            <div className="project-row" key={project.id}>
-              <div className="project-row__main">
-                <div className="project-row__titleline">
-                  <Link className="project-row__title stretched" to={`/projects/${project.id}`}>
+            <li className="project-row" key={project.id}>
+              <div className="project-row__body">
+                <div className="project-row__head">
+                  <Link className="project-row__title stretched" to={href}>
                     {project.title}
                   </Link>
-                  {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
                   <StatusBadge map={PROJECT_STATUS} value={project.status} />
-                  <StatusBadge map={PROJECT_DIFFICULTY} value={project.difficulty} />
-                  <TechChips items={project.techStack} />
+                  {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
+                  <span className="tag">{PROJECT_DIFFICULTY[project.difficulty].label}</span>
                 </div>
                 <p className="project-row__desc">{desc || '这个项目还没有写说明。'}</p>
-              </div>
-
-              <div className="project-row__meta">
-                <span className="project-card__owner">
-                  <Avatar name={project.owner?.name ?? undefined} src={project.owner?.avatar ?? undefined} size="sm" />
-                  {project.owner?.name ?? '—'}
-                </span>
-                <span>{project.memberCount} 人</span>
-                {project.waitingDemandCount > 0 ? (
-                  <Badge tone="amber">{project.waitingDemandCount} 个待接</Badge>
-                ) : null}
-                <span className="faint">
-                  <TimeAgo value={project.updatedAt} />
-                </span>
+                <div className="project-row__foot">
+                  {project.techStack.length > 0 ? (
+                    <span className="project-row__tech">
+                      {project.techStack.slice(0, 5).map((tech) => (
+                        <span className="tag" key={tech}>
+                          {tech}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                  <span className="project-row__meta">
+                    <span>{displayName(project.owner)}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{project.memberCount} 人</span>
+                    {project.waitingDemandCount > 0 ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="project-row__hot">{project.waitingDemandCount} 个需求待接</span>
+                      </>
+                    ) : null}
+                    <span aria-hidden="true">·</span>
+                    <TimeAgo value={project.updatedAt} />
+                  </span>
+                </div>
               </div>
 
               <div className="project-row__action">
-                {waitingApply ? (
-                  <Badge tone="blue">申请等待审批</Badge>
-                ) : canApply ? (
-                  <Link className="btn btn-primary btn-sm" to={`/projects/${project.id}/apply`}>
+                {!project.myRole && project.myApplyStatus === 'waiting' ? (
+                  <span className="faint">申请审核中</span>
+                ) : !project.myRole ? (
+                  <Link className="btn btn-secondary btn-sm" to={`${href}/apply`}>
                     申请加入
                   </Link>
                 ) : null}
               </div>
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
     );
   }
 
@@ -143,73 +204,78 @@ export default function ProjectsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">项目</h1>
-          <p className="page-sub">每个项目有若干所有者、管理员与成员；所有者与管理员负责审批加入申请、邀请成员与发布需求。</p>
+          <p className="page-sub">每个项目有所有者、管理员与成员；所有者与管理员审批加入申请、邀请成员、发布需求。</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => navigate('/projects/new')}>
-          新建项目
-        </button>
+        <div className="page-actions">
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/projects/new')}>
+            新建项目
+          </button>
+        </div>
       </div>
 
-      <div className="toolbar">
-        <div className="filter-chips">
-          {FILTERS.map((item) => (
-            <button
-              type="button"
-              key={item.key}
-              className={filter === item.key ? 'chip active' : 'chip'}
-              onClick={() => {
-                setFilter(item.key);
+      {narrow ? (
+        <>
+          <div className="filterbar filterbar--narrow">
+            <SearchField
+              value={term}
+              label="搜索项目"
+              placeholder="搜索项目、说明或技术栈"
+              onChange={(value) => {
+                setTerm(value);
                 setPage(1);
               }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="search">
-          <input
-            className="input"
-            placeholder="搜索项目名称"
+            />
+            <FilterToggle count={extraFilters} onClick={() => setSheet(true)} />
+          </div>
+          <div className="scroller">
+            <Segmented
+              label="项目范围"
+              value={scope}
+              options={SCOPES}
+              onChange={(value) => {
+                setScope(value);
+                setPage(1);
+              }}
+            />
+          </div>
+          <MobileFilters open={sheet} onClose={() => setSheet(false)} onReset={resetExtra} activeCount={extraFilters}>
+            <FilterField label="状态">{statusSelect}</FilterField>
+            <FilterField label="难度">{difficultySelect}</FilterField>
+          </MobileFilters>
+        </>
+      ) : (
+        <FilterBar summary={data ? `共 ${data.total} 个项目` : null}>
+          <Segmented
+            label="项目范围"
+            value={scope}
+            options={SCOPES}
+            onChange={(value) => {
+              setScope(value);
+              setPage(1);
+            }}
+          />
+          <span className="filterbar__spacer" />
+          {statusSelect}
+          {difficultySelect}
+          <SearchField
             value={term}
-            onChange={(event) => {
-              setTerm(event.target.value);
+            label="搜索项目"
+            placeholder="搜索项目、说明或技术栈"
+            onChange={(value) => {
+              setTerm(value);
               setPage(1);
             }}
           />
-        </div>
-      </div>
-      <div className="toolbar" style={{ marginTop: -6 }}>
-        <div className="filter-chips">
-          {STATUS_FILTERS.map((item) => (
-            <button
-              type="button"
-              key={item.key || 'any'}
-              className={statusFilter === item.key ? 'chip active' : 'chip'}
-              onClick={() => {
-                setStatusFilter(item.key);
-                setPage(1);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="search">
-          <input
-            className="input"
-            placeholder="按技术栈筛选，例如 React"
-            value={tech}
-            onChange={(event) => {
-              setTech(event.target.value);
-              setPage(1);
-            }}
-          />
-        </div>
-      </div>
+        </FilterBar>
+      )}
 
       {content}
-
-      <Pager page={data?.page ?? page} pageSize={data?.pageSize ?? pageSize} total={data?.total ?? 0} onPage={setPage} />
+      <Pager
+        page={data?.page ?? page}
+        pageSize={data?.pageSize ?? pageSize}
+        total={data?.total ?? 0}
+        onPage={setPage}
+      />
     </div>
   );
 }

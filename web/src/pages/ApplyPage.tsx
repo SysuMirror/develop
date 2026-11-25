@@ -84,23 +84,13 @@ function ApplyForm({ project }: { project: ProjectDetail }) {
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
           <h1 className="page-title">申请加入</h1>
-          <p className="page-sub">项目所有者或管理员会在项目页看到你的申请并做出决定；一条申请等待审批时不能重复提交。</p>
-        </div>
-        <div className="row page-actions">
-          <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
-            取消
-          </button>
-          <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving}>
-            {saving ? '提交中…' : '提交申请'}
-          </button>
+          <p className="page-sub">
+            {project.title} · 项目所有者或管理员会在项目页看到你的申请并做出决定；一条申请等待审批时不能重复提交。
+          </p>
         </div>
       </div>
 
       {error ? <div className="notice notice-error">{error}</div> : null}
-
-      <div className="faint" style={{ marginBottom: 14 }}>
-        申请项目：{project.title}
-      </div>
 
       <Field label="留言" hint="写点你能承担的部分，审批会更快；可以留空。">
         <textarea
@@ -116,6 +106,15 @@ function ApplyForm({ project }: { project: ProjectDetail }) {
           }}
         />
       </Field>
+
+      <div className="form-actions">
+        <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
+          取消
+        </button>
+        <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving}>
+          {saving ? '提交中…' : '提交申请'}
+        </button>
+      </div>
     </div>
   );
 }

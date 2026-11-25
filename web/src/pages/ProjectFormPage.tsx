@@ -77,19 +77,6 @@ function ProjectCreateForm() {
           <h1 className="page-title">新建项目</h1>
           <p className="page-sub">创建后你将成为该项目的所有者，可以审批成员申请并发布需求。</p>
         </div>
-        <div className="row page-actions">
-          <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void save()}
-            disabled={saving || !form.title.trim()}
-          >
-            {saving ? '创建中…' : '创建项目'}
-          </button>
-        </div>
       </div>
 
       {error ? <div className="notice notice-error">{error}</div> : null}
@@ -97,6 +84,20 @@ function ProjectCreateForm() {
       <ProjectTemplatePicker onPick={(template) => setForm((prev) => ({ ...prev, ...template }))} />
 
       <ProjectFields form={form} onChange={setForm} onSubmitShortcut={() => void save()} />
+
+      <div className="form-actions">
+        <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
+          取消
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => void save()}
+          disabled={saving || !form.title.trim()}
+        >
+          {saving ? '创建中…' : '创建项目'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -208,24 +209,25 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
           <h1 className="page-title">编辑项目</h1>
           <p className="page-sub">改动会立即体现在项目页；说明与仓库对所有开发者可见，开发说明仅成员可见。</p>
         </div>
-        <div className="row page-actions">
-          <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void save()}
-            disabled={saving || !form.title.trim()}
-          >
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
       </div>
 
       {error ? <div className="notice notice-error">{error}</div> : null}
 
       <ProjectFields form={form} onChange={setForm} onSubmitShortcut={() => void save()} />
+
+      <div className="form-actions">
+        <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
+          取消
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => void save()}
+          disabled={saving || !form.title.trim()}
+        >
+          {saving ? '保存中…' : '保存'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -251,7 +253,7 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
     <>
       <div className="form-section">
         <h3>基本信息</h3>
-        <Field label="项目名称" hint={`${form.title.trim().length} 字`}>
+        <Field label="项目名称" hint={form.title.trim() ? `${form.title.trim().length} / 128` : undefined}>
           <input
             className="input"
             value={form.title}
@@ -432,9 +434,9 @@ const PROJECT_TEMPLATES: ProjectTemplate[] = [
 
 function ProjectTemplatePicker({ onPick }: { onPick: (patch: ProjectTemplate['patch']) => void }) {
   return (
-    <div className="panel" style={{ marginBottom: 14 }}>
-      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span className="faint">从模板开始：</span>
+    <div className="panel template-picker">
+      <span className="template-picker__label">从模板开始</span>
+      <div className="template-picker__list">
         {PROJECT_TEMPLATES.map((template) => (
           <button
             key={template.label}
@@ -446,8 +448,8 @@ function ProjectTemplatePicker({ onPick }: { onPick: (patch: ProjectTemplate['pa
             {template.label}
           </button>
         ))}
-        <span className="faint">会覆盖说明、开发说明与技术栈</span>
       </div>
+      <span className="faint template-picker__hint">会覆盖说明、开发说明与技术栈</span>
     </div>
   );
 }

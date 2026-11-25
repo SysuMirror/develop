@@ -4,6 +4,19 @@ import { MarkdownText } from '../markdown';
 import { Skeleton } from '../ui';
 import type { GuideDoc } from '../types';
 
+/**
+ * 文档正文：标题、摘要与阅读时长已经展示在页头，正文里再去掉开头这几行，
+ * 否则同一屏会出现两次大标题。
+ */
+function bodyOf(content: string): string {
+  const lines = content.split('\n');
+  let index = 0;
+  if ((lines[index] ?? '').startsWith('# ')) index += 1;
+  while (index < lines.length && (lines[index] ?? '').trim() === '') index += 1;
+  while (index < lines.length && (lines[index] ?? '').trim().startsWith('>')) index += 1;
+  return lines.slice(index).join('\n');
+}
+
 export default function GuidePage() {
   const { data, loading, error } = useApi<{ items: GuideDoc[] }>('/guide');
   const [slug, setSlug] = useState<string | null>(null);
@@ -60,9 +73,14 @@ export default function GuidePage() {
         </nav>
 
         <article className="panel guide-content">
-          <h2 className="guide-content__title">{current.title}</h2>
-          {current.summary ? <p className="page-sub">{current.summary}</p> : null}
-          <MarkdownText source={current.content} />
+          <header className="guide-content__head">
+            <h2 className="guide-content__title">{current.title}</h2>
+            <div className="guide-content__meta">
+              {current.summary ? <span>{current.summary}</span> : null}
+              {current.minutes ? <span className="faint">预计阅读 {current.minutes} 分钟</span> : null}
+            </div>
+          </header>
+          <MarkdownText source={bodyOf(current.content)} />
         </article>
       </div>
     </div>

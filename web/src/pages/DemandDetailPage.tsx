@@ -4,7 +4,7 @@ import { DemandActions } from '../demand-actions';
 import { DemandRevisions } from '../demand-revisions';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
-import { DEMAND_DIFFICULTY, DEMAND_STATUS, Badge, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
+import { DEMAND_DIFFICULTY, DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem } from '../types';
 
 export default function DemandDetailPage() {
@@ -42,27 +42,24 @@ export default function DemandDetailPage() {
         ← {demand.project.title}
       </Link>
 
-      <div className="page-head" style={{ marginTop: 10 }}>
-        <div>
+      <div className="page-head detail-head" style={{ marginTop: 10 }}>
+        <div className="detail-head__main">
           <h1 className="page-title">{demand.title}</h1>
-          <div className="row" style={{ marginTop: 8 }}>
+          <div className="detail-head__meta">
             <StatusBadge map={DEMAND_STATUS} value={demand.status} />
-            <span className="faint">
-              发布 <TimeAgo value={demand.createdAt} />
-            </span>
-            {demand.revision > 0 ? (
-              <span className="faint">已修改 {demand.revision} 次</span>
-            ) : null}
+            {demand.difficulty ? <span className="tag">{DEMAND_DIFFICULTY[demand.difficulty].label}</span> : null}
+            {demand.estimateHours ? <span className="tag">预计 {demand.estimateHours} 小时</span> : null}
             {demand.labels.map((label) => (
-              <Badge key={label} tone="gray">
+              <span className="tag" key={label}>
                 {label}
-              </Badge>
+              </span>
             ))}
-            {demand.difficulty ? <StatusBadge map={DEMAND_DIFFICULTY} value={demand.difficulty} /> : null}
-            {demand.estimateHours ? <Badge tone="gray">预计 {demand.estimateHours} 小时</Badge> : null}
+            <span className="detail-head__sep" aria-hidden="true" />
+            <span>发布 <TimeAgo value={demand.createdAt} /></span>
+            {demand.revision > 0 ? <span>已修改 {demand.revision} 次</span> : null}
           </div>
         </div>
-        <div className="row page-actions">
+        <div className="page-actions">
           <DemandActions
             demand={demand}
             onChanged={reload}
@@ -72,59 +69,49 @@ export default function DemandDetailPage() {
         </div>
       </div>
 
-      <div className="panel">
-        <dl className="kv">
-          <dt>项目</dt>
-          <dd>
-            <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
-          </dd>
-          <dt>发布者</dt>
-          <dd>
-            {demand.creator ? (
-              <span>{displayName(demand.creator)}</span>
-            ) : (
-              <span className="faint">未知用户</span>
-            )}
-          </dd>
-          <dt>接单人</dt>
-          <dd>
-            {demand.assignee ? (
-              <>
-                <span>{displayName(demand.assignee)}</span>
-                {demand.acceptedAt ? (
-                  <span className="faint">
-                    {' '}
-                    · 接单 <TimeAgo value={demand.acceptedAt} />
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <span className="faint">等待接单</span>
-            )}
-          </dd>
-          {demand.deadline ? (
-            <>
-              <dt>期望完成</dt>
-              <dd className="faint">{formatTime(demand.deadline)}</dd>
-            </>
-          ) : null}
-          {demand.submittedAt ? (
-            <>
-              <dt>提交完成</dt>
-              <dd className="faint">
-                <TimeAgo value={demand.submittedAt} />
-              </dd>
-            </>
-          ) : null}
-          {demand.completedAt ? (
-            <>
-              <dt>验收完成</dt>
-              <dd className="faint">
-                <TimeAgo value={demand.completedAt} />
-              </dd>
-            </>
-          ) : null}
-        </dl>
+      <div className="detail-facts">
+        <span className="detail-facts__item">
+          <span className="faint">项目</span>
+          <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
+        </span>
+        <span className="detail-facts__item">
+          <span className="faint">发布者</span>
+          <span>{demand.creator ? displayName(demand.creator) : '未知用户'}</span>
+        </span>
+        <span className="detail-facts__item">
+          <span className="faint">接单人</span>
+          {demand.assignee ? (
+            <span>
+              {displayName(demand.assignee)}
+              {demand.acceptedAt ? (
+                <span className="faint">
+                  {' '}
+                  · 接单 <TimeAgo value={demand.acceptedAt} />
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="faint">等待接单</span>
+          )}
+        </span>
+        {demand.deadline ? (
+          <span className="detail-facts__item">
+            <span className="faint">期望完成</span>
+            <span>{formatTime(demand.deadline)}</span>
+          </span>
+        ) : null}
+        {demand.submittedAt ? (
+          <span className="detail-facts__item">
+            <span className="faint">提交完成</span>
+            <TimeAgo value={demand.submittedAt} />
+          </span>
+        ) : null}
+        {demand.completedAt ? (
+          <span className="detail-facts__item">
+            <span className="faint">验收完成</span>
+            <TimeAgo value={demand.completedAt} />
+          </span>
+        ) : null}
       </div>
 
       <div className="section-head">

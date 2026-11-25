@@ -110,20 +110,9 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
           <h1 className="page-title">发布需求</h1>
-          <p className="page-sub">需求对平台上的所有用户开放，接单后即可开始；同项目内标题不能重复。</p>
-        </div>
-        <div className="row page-actions">
-          <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void save()}
-            disabled={saving || !form.title.trim()}
-          >
-            {saving ? '发布中…' : '发布需求'}
-          </button>
+          <p className="page-sub">
+            {project.title} · 需求对平台上的所有用户开放，接单后即可开始；同项目内标题不能重复。
+          </p>
         </div>
       </div>
 
@@ -141,7 +130,7 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         />
       </Field>
 
-      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+      <div className="form-row-2">
         <Field label="标签" hint="逗号分隔，例如：前端, 文档">
           <input
             className="input"
@@ -160,7 +149,7 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         </Field>
       </div>
 
-      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+      <div className="form-row-2">
         <Field label="难度" hint="新手任务请标 starter，方便新人认领">
           <select
             className="input"
@@ -187,10 +176,6 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         </Field>
       </div>
 
-      <div className="faint" style={{ marginBottom: 14 }}>
-        所属项目：{project.title}
-      </div>
-
       <MarkdownEditor
         id="demand-new-detail"
         label="需求细节（Markdown）"
@@ -210,6 +195,20 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         previewEmpty="写清楚怎样算完成，提交与验收都以它为准。"
         onSubmitShortcut={() => void save()}
       />
+
+      <div className="form-actions">
+        <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
+          取消
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => void save()}
+          disabled={saving || !form.title.trim()}
+        >
+          {saving ? '发布中…' : '发布需求'}
+        </button>
+      </div>
     </div>
   );
 }

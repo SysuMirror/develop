@@ -105,28 +105,37 @@ export default function ProjectDetailPage() {
         ← 项目列表
       </Link>
 
-      <div className="page-head" style={{ marginTop: 10 }}>
-        <div>
+      <div className="page-head detail-head" style={{ marginTop: 10 }}>
+        <div className="detail-head__main">
           <h1 className="page-title">{data.title}</h1>
-          <div className="row" style={{ marginTop: 8 }}>
+          <div className="detail-head__meta">
             <StatusBadge map={PROJECT_STATUS} value={data.status} />
-            <StatusBadge map={PROJECT_DIFFICULTY} value={data.difficulty} />
-            <Badge tone="gray">{data.memberCount} 位成员</Badge>
-            <Badge tone={data.waitingDemandCount ? 'amber' : 'gray'}>{data.waitingDemandCount} 个待接需求</Badge>
-            {isAdmin ? <Badge tone="blue">{applyItems.length} 条待审申请</Badge> : null}
             {data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : null}
+            <span className="tag">{PROJECT_DIFFICULTY[data.difficulty].label}</span>
+            <span className="detail-head__sep" aria-hidden="true" />
+            <span className="detail-head__counts">
+              <span>{data.memberCount} 位成员</span>
+              <span aria-hidden="true">·</span>
+              <span>{data.waitingDemandCount} 个需求待接</span>
+              {isAdmin && applyItems.length > 0 ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{applyItems.length} 条待审申请</span>
+                </>
+              ) : null}
+            </span>
           </div>
           {data.techStack.length > 0 ? (
-            <div className="row" style={{ marginTop: 6, gap: 4, flexWrap: 'wrap' }}>
+            <div className="detail-head__tech">
               {data.techStack.map((tech) => (
-                <Badge key={tech} tone="gray">
+                <span className="tag" key={tech}>
                   {tech}
-                </Badge>
+                </span>
               ))}
             </div>
           ) : null}
         </div>
-        <div className="row page-actions">
+        <div className="page-actions">
           {permissions.canApply ? (
             <button type="button" className="btn btn-primary" onClick={() => navigate(`/projects/${id}/apply`)}>
               申请加入
@@ -147,44 +156,42 @@ export default function ProjectDetailPage() {
                 编辑
               </button>
               {isOwner ? (
-                <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'delete' })}>
-                  删除项目
+                <button type="button" className="btn btn-ghost btn-danger" onClick={() => setDialog({ kind: 'delete' })}>
+                  删除
                 </button>
               ) : null}
             </>
           ) : null}
           {isMember && !isOwner ? (
-            <button type="button" className="btn btn-danger" onClick={() => setDialog({ kind: 'quit' })}>
+            <button type="button" className="btn btn-ghost btn-danger" onClick={() => setDialog({ kind: 'quit' })}>
               退出项目
             </button>
           ) : null}
         </div>
       </div>
 
-      <div className="panel">
-        <dl className="kv">
-          <dt>所有者</dt>
-          <dd>
-            {data.owners.length > 0 ? (
-              <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-                {data.owners.map((owner) => (
-                  <span className="row" key={owner.userId} style={{ gap: 6, display: 'inline-flex' }}>
-                    <Avatar name={displayName(owner)} src={owner.avatar} />
-                    {displayName(owner)}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <span className="faint">—</span>
-            )}
-          </dd>
-          <dt>创建时间</dt>
-          <dd>
-            <TimeAgo value={data.createdAt} />
-          </dd>
-          <dt>我的角色</dt>
-          <dd>{data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : <span className="faint">非成员</span>}</dd>
-        </dl>
+      <div className="detail-facts">
+        <span className="detail-facts__item">
+          <span className="faint">所有者</span>
+          {data.owners.length > 0 ? (
+            data.owners.map((owner) => (
+              <span className="detail-facts__person" key={owner.userId}>
+                <Avatar name={displayName(owner)} src={owner.avatar} size="sm" />
+                {displayName(owner)}
+              </span>
+            ))
+          ) : (
+            <span className="faint">—</span>
+          )}
+        </span>
+        <span className="detail-facts__item">
+          <span className="faint">创建</span>
+          <TimeAgo value={data.createdAt} />
+        </span>
+        <span className="detail-facts__item">
+          <span className="faint">更新</span>
+          <TimeAgo value={data.updatedAt} />
+        </span>
       </div>
 
       {data.repoUrls.length > 0 ? (
