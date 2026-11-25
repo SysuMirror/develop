@@ -134,9 +134,10 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 
 ** 列表与详情
 
-- =GET /api/projects= ： =q= 匹配项目标题， =filter= 取 =all= / =mine-owner= / =mine-member= /
-  =recruiting= （有 waiting 需求的项目），按创建时间倒序，分页返回 =items/total/page/pageSize= ，
-  每行带 =myRole= 与 =myApplyStatus= 。
+- =GET /api/projects= ： =q= 同时匹配标题、说明与技术栈； =status= 取四个项目状态之一，
+  =difficulty= 取 =starter= / =standard= ， =tech= 按技术栈精确过滤。 =filter= 取 =all= /
+  =mine-owner= / =mine-member= / =recruiting= （有 waiting 需求的项目），按创建时间倒序，分页返回
+  =items/total/page/pageSize= ，每行带 =myRole= 与 =myApplyStatus= 。
 - =GET /api/projects/:id= ：成员按所有者、管理员、成员排序、加入时间排序；需求按 waiting → accepted →
   completed 排序。返回 =permissions= （ =isMember= / =isLeader= / =canApply= / =canManage= ），
   前端据此决定是否显示「申请加入」与是否显示管理按钮。
@@ -232,9 +233,10 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 =completed= （已完成）、 =suspended= （挂起）。正常流转是 waiting → accepted → review →
 completed；驳回把 review 退回 accepted，接单人不变；挂起记录来源状态，恢复后回到原状态。
 
-- =GET /api/demands= ： =status= 取五态之一， =q= 匹配标题；登录后可用
-  =scope= 取 =created= 或 =assigned= 时只看我发布的 / 我接的。排序是 waiting → accepted →
-  review → completed → suspended，同状态按发布时间倒序。
+- =GET /api/demands= ： =status= 取五态之一； =q= 同时匹配标题、详情与标签， =label= 按标签精确过滤，
+  =difficulty= 取 =starter= / =normal= / =challenging= ；登录后可用 =scope= 取 =created= 或
+  =assigned= 时只看我发布的 / 我接的。排序是 waiting → accepted → review → completed →
+  suspended，同状态按发布时间倒序。
 - =GET /api/demands/:id= ： 单条需求，字段与列表项一致；不存在的 id 返回 404 =NOT_FOUND= 。
 - 每条需求带 =permissions= （ =canEdit= / =canAccept= / =canSubmit= / =canReview= /
   =canSuspend= / =canResume= ），服务端按当前登录者算好，前端只照着渲染按钮。
@@ -381,6 +383,12 @@ leader 与申请数：
 
 Vite 开发服务器监听 =0.0.0.0:5173= ， =/api= 代理到 =API_TARGET= （默认
 =http://127.0.0.1:8080= ）。改后端端口时同时改这个变量。
+
+** 界面规范
+
+间距、控件尺寸、列表与详情页结构、响应式断点和自测清单写在 =docs/ui.md= ，改界面前先读一遍。
+通用组件在 =web/src/ui.tsx= （徽标、时间、弹窗、空状态、分页），筛选件在 =web/src/filters.tsx=
+（筛选栏、分段控件、搜索框、下拉、移动端筛选抽屉）；页面里不要再手写一套。
 
 ** 登录与联调
 
