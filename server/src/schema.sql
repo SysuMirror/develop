@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS projects (
   repo_url VARCHAR(512) NULL,
   repo_urls JSON NULL,
   dev_notes TEXT NULL,
+  status ENUM('recruiting','active','paused','archived') NOT NULL DEFAULT 'active',
+  difficulty ENUM('starter','standard') NOT NULL DEFAULT 'standard',
+  tech_stack JSON NULL,
   leader_id VARCHAR(36) NOT NULL,
   created_by VARCHAR(36) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -69,6 +72,10 @@ CREATE TABLE IF NOT EXISTS demands (
   project_id INT UNSIGNED NOT NULL,
   title VARCHAR(128) NOT NULL,
   detail TEXT NULL,
+  -- 验收标准：提交与验收都对着它；deadline 为空表示不限期。
+  acceptance TEXT NULL,
+  deadline DATETIME NULL,
+  labels JSON NULL,
   user_id VARCHAR(36) NULL,
   created_by VARCHAR(36) NULL,
   status ENUM('waiting','accepted','review','completed','suspended') NOT NULL DEFAULT 'waiting',
@@ -107,6 +114,11 @@ CREATE TABLE IF NOT EXISTS user_profile (
   name       VARCHAR(128) NULL,
   avatar     VARCHAR(512) NULL,
   email      VARCHAR(255) NULL,
+  -- 开发者档案：仅本站展示用，技能/年级/GitHub/自我介绍。
+  skills     JSON NULL,
+  github     VARCHAR(128) NULL,
+  grade      VARCHAR(32) NULL,
+  bio        TEXT NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

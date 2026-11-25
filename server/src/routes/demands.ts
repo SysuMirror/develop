@@ -8,7 +8,7 @@ import type { DemandJoinedRow, DemandRevisionRow, DemandRow, DemandStatus, Direc
 const router = Router();
 
 const DEMAND_SELECT = `
-  SELECT d.id, d.title, d.detail, d.status, d.status_before_suspend,
+  SELECT d.id, d.title, d.detail, d.acceptance, d.deadline, d.labels, d.status, d.status_before_suspend,
          d.created_at, d.accepted_at, d.submitted_at, d.completed_at,
          d.created_by,
          d.user_id, d.revision,
@@ -19,6 +19,50 @@ const DEMAND_SELECT = `
 const SUSPENDABLE: DemandStatus[] = ['waiting', 'accepted', 'review'];
 // 待确认、已完成的需求已经进入验收／结案，改动会让验收对象和记录失真。
 const EDITABLE: DemandStatus[] = ['waiting', 'accepted', 'suspended'];
+
+/** 「验收标准」是自由文本，最长 5000 字。 */
+function cleanAcceptance(raw: unknown): string | null {
+  if (raw == null) return null;
+  const value = String(raw).trim();
+  if (value.length > 5000) throw badRequest('BAD_ACCEPTANCE', '验收标准不超过 5000 字');
+  return value || null;
+}
+
+/** 截止时间：接受 ISO 字符串或空；只保留到分钟。 */
+function cleanDeadline(raw: unknown): string | null {
+  if (raw == null || raw === '') return null;
+  const date = new Date(String(raw));
+  if (Number.isNaN(date.getTime())) throw badRequest('BAD_DEADLINE', '截止时间格式不正确');
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/** 需求标签：去重、限长、最多 8 个。 */
+function cleanLabels(raw: unknown): string[] {
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(',');
+  const out: string[] = [];
+  for (const item of list) {
+    const value = String(item ?? '').trim();
+    if (!value) continue;
+    if (value.length > 16) throw badRequest('BAD_LABEL', '单个标签不超过 16 字');
+    if (!out.includes(value)) out.push(value);
+  }
+  if (out.length > 8) throw badRequest('TOO_MANY_LABELS', '标签最多 8 个');
+  return out;
+}
+
+function jsonListOf(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((item) => String(item)).filter(Boolean);
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item)).filter(Boolean);
+    } catch {
+      /* 坏数据按空处理 */
+    }
+  }
+  return [];
+}
 
 type Viewer = {
   id: string;
@@ -72,6 +116,9 @@ function mapDemand(
     id: row.id,
     title: row.title,
     detail: row.detail,
+    acceptance: row.acceptance,
+    deadline: row.deadline,
+    labels: jsonListOf(row.labels),
     status: row.status,
     createdAt: row.created_at,
     revision: Number(row.revision),
@@ -133,6 +180,11 @@ router.get(
     if (term) {
       conditions.push('d.title LIKE ?');
       params.push(term);
+    }
+    const label = String(req.query.label || '').trim();
+    if (label) {
+      conditions.push('JSON_CONTAINS(COALESCE(d.labels, JSON_ARRAY()), JSON_QUOTE(?))');
+      params.push(label);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = await query<DemandJoinedRow>(
@@ -199,6 +251,9 @@ router.post(
     await requireMember(project.id, user);
     const title = String(req.body?.title ?? '').trim();
     const detail = req.body?.detail == null ? null : String(req.body.detail).trim();
+    const acceptance = cleanAcceptance(req.body?.acceptance);
+    const deadline = cleanDeadline(req.body?.deadline);
+    const labels = cleanLabels(req.body?.labels);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
     const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ?', [
       project.id,
@@ -210,8 +265,9 @@ router.post(
       // 需求行与 v0 快照同事务写入：只落半边会让修订历史少了发布时的原文。
       inserted = await withTx(async (conn) => {
         const [result] = await conn.query(
-          "INSERT INTO demands (project_id, title, detail, created_by, status) VALUES (?, ?, ?, ?, 'waiting')",
-          [project.id, title, detail, user.id],
+          `INSERT INTO demands (project_id, title, detail, acceptance, deadline, labels, created_by, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting')`,
+          [project.id, title, detail, acceptance, deadline, JSON.stringify(labels), user.id],
         );
         const header = result as { insertId: number };
         await conn.query(
@@ -243,6 +299,10 @@ router.patch(
     let detail = demand.detail;
     if (req.body?.detail === null) detail = null;
     else if (req.body?.detail !== undefined) detail = String(req.body.detail).trim();
+    const acceptance =
+      req.body?.acceptance !== undefined ? cleanAcceptance(req.body.acceptance) : (demand.acceptance ?? null);
+    const deadline = req.body?.deadline !== undefined ? cleanDeadline(req.body.deadline) : null;
+    const labels = req.body?.labels !== undefined ? cleanLabels(req.body.labels) : jsonListOf(demand.labels);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
     const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ? AND id <> ?', [
       demand.project_id,
@@ -251,24 +311,30 @@ router.patch(
     ]);
     if (duplicate) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
     const nextDetail = detail ? detail : null;
+    const deadlineValue = req.body?.deadline !== undefined ? deadline : (demand.deadline ?? null);
+    const metaChanged =
+      (acceptance ?? null) !== (demand.acceptance ?? null) ||
+      String(deadlineValue ?? '') !== String(demand.deadline ?? '') ||
+      JSON.stringify(labels) !== JSON.stringify(jsonListOf(demand.labels));
     // 内容没变就不算一次修改：避免点开编辑又原样保存把版本号刷上去。
-    if (title === demand.title && nextDetail === (demand.detail ?? null)) {
+    if (title === demand.title && nextDetail === (demand.detail ?? null) && !metaChanged) {
       await respond(res, demand.id, user.id);
       return;
     }
-    const nextRevision = Number(demand.revision) + 1;
+    const contentChanged = title !== demand.title || nextDetail !== (demand.detail ?? null);
+    const nextRevision = contentChanged ? Number(demand.revision) + 1 : Number(demand.revision);
     try {
       await withTx(async (conn) => {
-        await conn.query('UPDATE demands SET title = ?, detail = ?, revision = ? WHERE id = ?', [
-          title,
-          nextDetail,
-          nextRevision,
-          demand.id,
-        ]);
         await conn.query(
-          'INSERT INTO demand_revision (demand_id, revision, title, detail, editor_id) VALUES (?, ?, ?, ?, ?)',
-          [demand.id, nextRevision, title, nextDetail, user.id],
+          'UPDATE demands SET title = ?, detail = ?, acceptance = ?, deadline = ?, labels = ?, revision = ? WHERE id = ?',
+          [title, nextDetail, acceptance, deadlineValue, JSON.stringify(labels), nextRevision, demand.id],
         );
+        if (contentChanged) {
+          await conn.query(
+            'INSERT INTO demand_revision (demand_id, revision, title, detail, editor_id) VALUES (?, ?, ?, ?, ?)',
+            [demand.id, nextRevision, title, nextDetail, user.id],
+          );
+        }
       });
     } catch (error) {
       if (isDuplicateEntry(error)) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');

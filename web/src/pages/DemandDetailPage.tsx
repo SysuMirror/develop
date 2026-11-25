@@ -1,10 +1,10 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ApiError, messageOf } from '../api';
+import { ApiError, formatTime, messageOf } from '../api';
 import { DemandActions } from '../demand-actions';
 import { DemandRevisions } from '../demand-revisions';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
-import { DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
+import { DEMAND_STATUS, Badge, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem } from '../types';
 
 export default function DemandDetailPage() {
@@ -53,6 +53,11 @@ export default function DemandDetailPage() {
             {demand.revision > 0 ? (
               <span className="faint">已修改 {demand.revision} 次</span>
             ) : null}
+            {demand.labels.map((label) => (
+              <Badge key={label} tone="gray">
+                {label}
+              </Badge>
+            ))}
           </div>
         </div>
         <div className="row page-actions">
@@ -95,6 +100,12 @@ export default function DemandDetailPage() {
               <span className="faint">等待接单</span>
             )}
           </dd>
+          {demand.deadline ? (
+            <>
+              <dt>期望完成</dt>
+              <dd className="faint">{formatTime(demand.deadline)}</dd>
+            </>
+          ) : null}
           {demand.submittedAt ? (
             <>
               <dt>提交完成</dt>
@@ -120,6 +131,18 @@ export default function DemandDetailPage() {
       <div className="panel">
         <MarkdownText source={demand.detail} empty="发布时没有填写详情。" />
       </div>
+
+      {demand.acceptance && demand.acceptance.trim() ? (
+        <>
+          <div className="section-head">
+            <h2>验收标准</h2>
+            <span className="faint">提交与验收都以它为准</span>
+          </div>
+          <div className="panel">
+            <MarkdownText source={demand.acceptance} />
+          </div>
+        </>
+      ) : null}
 
       <DemandRevisions demandId={demand.id} revision={demand.revision} />
     </div>

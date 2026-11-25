@@ -8,6 +8,8 @@ import { ProjectFilesSection } from '../project-files';
 import {
   APPLY_TYPE,
   DEMAND_STATUS,
+  PROJECT_DIFFICULTY,
+  PROJECT_STATUS,
   ROLE,
   Avatar,
   Badge,
@@ -107,11 +109,22 @@ export default function ProjectDetailPage() {
         <div>
           <h1 className="page-title">{data.title}</h1>
           <div className="row" style={{ marginTop: 8 }}>
+            <StatusBadge map={PROJECT_STATUS} value={data.status} />
+            <StatusBadge map={PROJECT_DIFFICULTY} value={data.difficulty} />
             <Badge tone="gray">{data.memberCount} 位成员</Badge>
             <Badge tone={data.waitingDemandCount ? 'amber' : 'gray'}>{data.waitingDemandCount} 个待接需求</Badge>
             {isAdmin ? <Badge tone="blue">{applyItems.length} 条待审申请</Badge> : null}
             {data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : null}
           </div>
+          {data.techStack.length > 0 ? (
+            <div className="row" style={{ marginTop: 6, gap: 4, flexWrap: 'wrap' }}>
+              {data.techStack.map((tech) => (
+                <Badge key={tech} tone="gray">
+                  {tech}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="row page-actions">
           {permissions.canApply ? (
@@ -235,6 +248,15 @@ export default function ProjectDetailPage() {
               <Avatar name={displayName(member)} src={member.avatar} />
               <div className="grow">
                 <span>{displayName(member)}</span>
+                {member.skills.length > 0 ? (
+                  <span className="row" style={{ gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                    {member.skills.slice(0, 4).map((skill) => (
+                      <Badge key={skill} tone="gray">
+                        {skill}
+                      </Badge>
+                    ))}
+                  </span>
+                ) : null}
                 <div className="faint">
                   加入于 <TimeAgo value={member.joinedAt} />
                 </div>

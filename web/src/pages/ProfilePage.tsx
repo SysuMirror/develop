@@ -11,13 +11,14 @@ import {
   Avatar,
   Badge,
   Empty,
+  Field,
   Skeleton,
   StatusBadge,
   TimeAgo,
   displayName,
   useToast,
 } from '../ui';
-import type { ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
+import type { ApplyItem, DemandItem, MyProfile, Paged, ProjectSummary } from '../types';
 
 function demandTime(demand: DemandItem): string | null {
   if (demand.status === 'completed') return demand.completedAt;
@@ -51,9 +52,45 @@ export default function ProfilePage() {
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const projects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'all', pageSize: 50 })}`);
   const feed = useDemandFeed();
+  const profile = useApi<MyProfile>('/me/profile');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [profileForm, setProfileForm] = useState({ skills: '', github: '', grade: '', bio: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  function startEdit() {
+    const current = profile.data;
+    setProfileForm({
+      skills: (current?.skills ?? []).join(', '),
+      github: current?.github ?? '',
+      grade: current?.grade ?? '',
+      bio: current?.bio ?? '',
+    });
+    setEditing(true);
+  }
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    try {
+      await api.patch('/me/profile', {
+        skills: profileForm.skills.split(',').map((item) => item.trim()).filter(Boolean),
+        github: profileForm.github.trim() || null,
+        grade: profileForm.grade.trim() || null,
+        bio: profileForm.bio.trim() || null,
+      });
+      push('档案已保存', 'success');
+      setEditing(false);
+      profile.reload();
+    } catch (error) {
+      push(messageOf(error), 'error');
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   const myProjects = (projects.data?.items ?? []).filter((project) => project.myRole);
+  const managedProjects = myProjects.filter((project) => project.myRole === 'owner' || project.myRole === 'admin');
+  const joinedProjects = myProjects.filter((project) => project.myRole === 'member');
   const inboxItems = inbox.data?.items ?? [];
   const myDemands = feed.items.filter((demand) => demand.assignee?.id === user?.id);
   const ongoing = sortByTimeDesc(
@@ -144,16 +181,13 @@ export default function ProfilePage() {
     );
   }
 
-  let projectsBlock: ReactNode;
-  if (projects.loading) {
-    projectsBlock = <Skeleton rows={2} />;
-  } else if (myProjects.length === 0) {
-    projectsBlock = <Empty title="还没有参与项目" hint="浏览项目列表，申请加入或自己建一个。" />;
-  } else {
-    projectsBlock = (
+  const projectList = (list: ProjectSummary[], emptyTitle: string, emptyHint: string): ReactNode => {
+    if (projects.loading) return <Skeleton rows={2} />;
+    if (list.length === 0) return <Empty title={emptyTitle} hint={emptyHint} />;
+    return (
       <div className="panel">
         <div className="list">
-          {myProjects.map((project) => (
+          {list.map((project) => (
             <div className="list__row" key={project.id}>
               <div className="grow">
                 <Link to={`/projects/${project.id}`}>{project.title}</Link>
@@ -168,7 +202,10 @@ export default function ProfilePage() {
         </div>
       </div>
     );
-  }
+  };
+
+  const managedBlock = projectList(managedProjects, '还没有负责的项目', '浏览项目列表，申请加入或自己建一个。');
+  const joinedBlock = projectList(joinedProjects, '还没有参与的项目', '申请加入项目后，会出现在这里。');
 
   let demandsBlock: ReactNode;
   if (feed.loading) {
@@ -212,16 +249,94 @@ export default function ProfilePage() {
       </div>
 
       <div className="section-head">
+        <h2>开发者档案</h2>
+        <span className="faint">展示给同学看：技能、年级、GitHub、自我介绍</span>
+      </div>
+      <div className="panel">
+        {editing ? (
+          <>
+            <Field label="技能标签" hint="逗号分隔，最多 8 个，例如：React, TypeScript">
+              <input
+                className="input"
+                value={profileForm.skills}
+                onChange={(event) => setProfileForm({ ...profileForm, skills: event.target.value })}
+              />
+            </Field>
+            <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+              <Field label="年级" hint="例如：大三 / 研一">
+                <input
+                  className="input"
+                  value={profileForm.grade}
+                  onChange={(event) => setProfileForm({ ...profileForm, grade: event.target.value })}
+                />
+              </Field>
+              <Field label="GitHub" hint="用户名或主页链接">
+                <input
+                  className="input"
+                  value={profileForm.github}
+                  onChange={(event) => setProfileForm({ ...profileForm, github: event.target.value })}
+                />
+              </Field>
+            </div>
+            <Field label="自我介绍" hint="不超过 2000 字">
+              <textarea
+                className="input"
+                rows={4}
+                value={profileForm.bio}
+                onChange={(event) => setProfileForm({ ...profileForm, bio: event.target.value })}
+              />
+            </Field>
+            <div className="row" style={{ gap: 8 }}>
+              <button type="button" className="btn btn-primary btn-sm" disabled={savingProfile} onClick={() => void saveProfile()}>
+                {savingProfile ? '保存中…' : '保存档案'}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>
+                取消
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+              {profile.data?.grade ? <Badge tone="blue">{profile.data.grade}</Badge> : null}
+              {(profile.data?.skills ?? []).map((skill) => (
+                <Badge key={skill} tone="gray">
+                  {skill}
+                </Badge>
+              ))}
+              {profile.data?.github ? (
+                <a className="btn-link" href={/^https?:/i.test(profile.data.github) ? profile.data.github : `https://github.com/${profile.data.github}`} target="_blank" rel="noreferrer">
+                  GitHub
+                </a>
+              ) : null}
+              <button type="button" className="btn btn-secondary btn-sm" onClick={startEdit}>
+                编辑档案
+              </button>
+            </div>
+            <p className="faint" style={{ margin: '10px 0 0' }}>
+              {profile.data?.bio || '还没有自我介绍。写一句你擅长什么、想学什么。'}
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="section-head">
         <h2>待我审批</h2>
         <span className="faint">{inboxItems.length} 条</span>
       </div>
       {inboxBlock}
 
       <div className="section-head">
-        <h2>我参与的项目</h2>
-        <span className="faint">{myProjects.length} 个</span>
+        <h2>我负责的</h2>
+        <span className="faint">{managedProjects.length} 个</span>
       </div>
-      {projectsBlock}
+      {managedBlock}
+
+      <div className="section-head">
+        <h2>我参与的</h2>
+        <span className="faint">{joinedProjects.length} 个</span>
+      </div>
+      {joinedBlock}
 
       <div className="section-head">
         <h2>个人参与的需求</h2>

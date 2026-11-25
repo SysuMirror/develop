@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, messageOf } from '../api';
 import { useApi } from '../hooks';
 import { MarkdownEditor } from '../markdown-editor';
-import { Field, Skeleton, useToast } from '../ui';
-import type { ProjectDetail } from '../types';
+import { Field, PROJECT_DIFFICULTY, PROJECT_STATUS, Skeleton, useToast } from '../ui';
+import type { ProjectDetail, ProjectDifficulty, ProjectStatus } from '../types';
 
 /**
  * 新建与编辑项目共用一个页面组件：没有 :id 是新建，有 :id 是编辑。
@@ -19,7 +19,15 @@ export default function ProjectFormPage() {
 function ProjectCreateForm() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: '', misc: '', repoUrls: [''], devNotes: '' });
+  const [form, setForm] = useState({
+    title: '',
+    misc: '',
+    repoUrls: [''],
+    devNotes: '',
+    status: 'active' as ProjectStatus,
+    difficulty: 'standard' as ProjectDifficulty,
+    techText: '',
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +35,8 @@ function ProjectCreateForm() {
     form.title.trim() !== '' ||
     form.misc.trim() !== '' ||
     form.repoUrls.some((url) => url.trim() !== '') ||
-    form.devNotes.trim() !== '';
+    form.devNotes.trim() !== '' ||
+    form.techText.trim() !== '';
 
   function leave() {
     if (dirty && !window.confirm('放弃尚未创建的项目？')) return;
@@ -45,6 +54,9 @@ function ProjectCreateForm() {
         misc: form.misc.trim() || null,
         repoUrls: form.repoUrls.map((url) => url.trim()).filter(Boolean),
         devNotes: form.devNotes.trim() || null,
+        status: form.status,
+        difficulty: form.difficulty,
+        techStack: form.techText.split(',').map((item) => item.trim()).filter(Boolean),
       });
       toast.push('项目已创建。', 'success');
       navigate(`/projects/${created.id}`);
@@ -81,6 +93,8 @@ function ProjectCreateForm() {
       </div>
 
       {error ? <div className="notice notice-error">{error}</div> : null}
+
+      <ProjectTemplatePicker onPick={(template) => setForm((prev) => ({ ...prev, ...template }))} />
 
       <ProjectFields form={form} onChange={setForm} onSubmitShortcut={() => void save()} />
     </div>
@@ -136,17 +150,24 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
     misc: project.misc ?? '',
     repoUrls: project.repoUrls.length > 0 ? project.repoUrls : [''],
     devNotes: project.devNotes ?? '',
+    status: project.status,
+    difficulty: project.difficulty,
+    techText: project.techStack.join(', '),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const detailPath = `/projects/${project.id}`;
   const cleanUrls = (list: string[]) => JSON.stringify(list.map((url) => url.trim()).filter(Boolean));
+  const cleanTech = (text: string) => JSON.stringify(text.split(',').map((item) => item.trim()).filter(Boolean));
   const dirty =
     form.title !== project.title ||
     form.misc !== (project.misc ?? '') ||
     cleanUrls(form.repoUrls) !== cleanUrls(project.repoUrls) ||
-    form.devNotes !== (project.devNotes ?? '');
+    form.devNotes !== (project.devNotes ?? '') ||
+    form.status !== project.status ||
+    form.difficulty !== project.difficulty ||
+    cleanTech(form.techText) !== cleanTech(project.techStack.join(','));
 
   function leave() {
     if (dirty && !window.confirm('放弃未保存的修改？')) return;
@@ -164,6 +185,9 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
         misc: form.misc.trim() || null,
         repoUrls: form.repoUrls.map((url) => url.trim()).filter(Boolean),
         devNotes: form.devNotes.trim() || null,
+        status: form.status,
+        difficulty: form.difficulty,
+        techStack: form.techText.split(',').map((item) => item.trim()).filter(Boolean),
       });
       toast.push('项目已保存。', 'success');
       navigate(detailPath);
@@ -211,6 +235,9 @@ interface ProjectFormState {
   misc: string;
   repoUrls: string[];
   devNotes: string;
+  status: ProjectStatus;
+  difficulty: ProjectDifficulty;
+  techText: string;
 }
 
 interface ProjectFieldsProps {
@@ -282,6 +309,44 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
         </div>
       </Field>
 
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="项目状态" hint="招募中会出现在「招募中」筛选里">
+          <select
+            className="input"
+            value={form.status}
+            onChange={(event) => onChange({ ...form, status: event.target.value as ProjectStatus })}
+          >
+            {Object.entries(PROJECT_STATUS).map(([key, meta]) => (
+              <option key={key} value={key}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="难度" hint="入门友好的项目更容易被新人认领">
+          <select
+            className="input"
+            value={form.difficulty}
+            onChange={(event) => onChange({ ...form, difficulty: event.target.value as ProjectDifficulty })}
+          >
+            {Object.entries(PROJECT_DIFFICULTY).map(([key, meta]) => (
+              <option key={key} value={key}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="技术栈（对外可见）" hint="逗号分隔，例如：React, TypeScript, MySQL；最多 10 个">
+        <input
+          className="input"
+          value={form.techText}
+          placeholder="React, Node.js, MySQL"
+          onChange={(event) => onChange({ ...form, techText: event.target.value })}
+        />
+      </Field>
+
       <MarkdownEditor
         id="project-dev-notes"
         label="开发说明（仅项目成员可见）"
@@ -293,5 +358,86 @@ function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps)
         onSubmitShortcut={onSubmitShortcut}
       />
     </>
+  );
+}
+
+interface ProjectTemplate {
+  label: string;
+  hint: string;
+  patch: Partial<{
+    misc: string;
+    devNotes: string;
+    techText: string;
+    status: ProjectStatus;
+    difficulty: ProjectDifficulty;
+  }>;
+}
+
+const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  {
+    label: 'Web 应用',
+    hint: '有页面、有接口的前端项目',
+    patch: {
+      misc: '## 要解决什么问题\n\n（一句话说明用户是谁、痛点是什么）\n\n## 技术栈\n\n- 前端：React + Vite + TypeScript\n- 后端：Node.js / 其他\n\n## 协作方式\n\n- 分支：main 保护，功能走 PR\n- 评审：至少一位成员通过',
+      devNotes: '## 本地启动\n\n```bash\nnpm install\nnpm run dev\n```\n\n## 约定\n\n- 环境变量放 `.env.local`，不进仓库\n- 提交前跑 lint 与 typecheck',
+      techText: 'React, TypeScript, Vite',
+      status: 'recruiting',
+      difficulty: 'starter',
+    },
+  },
+  {
+    label: '后端服务',
+    hint: '接口、任务、数据处理',
+    patch: {
+      misc: '## 服务职责\n\n（对外提供什么能力）\n\n## 接口约定\n\n- 鉴权方式：\n- 错误码：\n\n## 部署\n\n- 测试环境：\n- 生产发布：需要 owner 审批',
+      devNotes: '## 本地环境\n\n- 数据库：\n- 依赖服务：\n\n## 运行\n\n```bash\nnpm install\nnpm run dev\n```',
+      techText: 'Node.js, MySQL',
+      status: 'recruiting',
+      difficulty: 'standard',
+    },
+  },
+  {
+    label: '算法 / 数据',
+    hint: '模型、脚本、离线任务',
+    patch: {
+      misc: '## 目标\n\n（要回答的问题或要产出的结果）\n\n## 数据来源\n\n- \n\n## 验收\n\n- 指标：\n- 交付物：代码 + 说明文档',
+      devNotes: '## 环境\n\n- Python 版本：\n- 依赖：requirements.txt\n\n## 目录约定\n\n- `data/` 只放样例，大数据走对象存储\n- `notebooks/` 用于探索，正式逻辑进 `src/`',
+      techText: 'Python, Pandas',
+      status: 'recruiting',
+      difficulty: 'standard',
+    },
+  },
+  {
+    label: '课程 / 工具',
+    hint: '小工具、课程项目、一次性脚本',
+    patch: {
+      misc: '## 背景\n\n（课程要求或个人想法）\n\n## 交付\n\n- 可运行的代码\n- 使用说明',
+      devNotes: '## 运行方式\n\n```bash\n# 写清楚怎么跑起来\n```\n\n## 注意事项\n\n- ',
+      techText: 'TypeScript',
+      status: 'active',
+      difficulty: 'starter',
+    },
+  },
+];
+
+function ProjectTemplatePicker({ onPick }: { onPick: (patch: ProjectTemplate['patch']) => void }) {
+  return (
+    <div className="panel" style={{ marginBottom: 14 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="faint">从模板开始：</span>
+        {PROJECT_TEMPLATES.map((template) => (
+          <button
+            key={template.label}
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title={template.hint}
+            onClick={() => onPick(template.patch)}
+          >
+            {template.label}
+          </button>
+        ))}
+        <span className="faint">会覆盖说明、开发说明与技术栈</span>
+      </div>
+    </div>
   );
 }

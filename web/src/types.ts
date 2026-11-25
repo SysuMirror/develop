@@ -3,6 +3,8 @@
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type DemandStatus = 'waiting' | 'accepted' | 'review' | 'completed' | 'suspended';
 export type Role = 'owner' | 'admin' | 'member';
+export type ProjectStatus = 'recruiting' | 'active' | 'paused' | 'archived';
+export type ProjectDifficulty = 'starter' | 'standard';
 export type ApplyType = 'leader' | 'participant';
 export type ApplySource = 'web' | 'join';
 export type Qualification = 'ok' | 'none' | 'unknown';
@@ -45,6 +47,9 @@ export interface ProjectSummary {
   misc: string | null;
   /** 仓库地址（可多个）：所有能进平台的人都能看到。 */
   repoUrls: string[];
+  status: ProjectStatus;
+  difficulty: ProjectDifficulty;
+  techStack: string[];
   createdAt: string;
   updatedAt: string;
   /** 首任所有者（建项人）；完整所有者列表在详情里。 */
@@ -60,6 +65,7 @@ export interface ProjectMember {
   userId: string;
   name: string | null;
   avatar: string | null;
+  skills: string[];
   role: Role;
   /** 建项人（首任所有者），不能被移除或改角色。 */
   isPrimary: boolean;
@@ -116,6 +122,10 @@ export interface DemandItem {
   id: number;
   title: string;
   detail: string | null;
+  /** 验收标准（Markdown）。 */
+  acceptance: string | null;
+  deadline: string | null;
+  labels: string[];
   status: DemandStatus;
   createdAt: string;
   /** 当前版本号，等于被修改的次数；0 表示还是发布时的原文。 */
@@ -152,6 +162,28 @@ export interface ProjectFile {
   createdAt: string;
   previewUrl: string;
   downloadUrl: string;
+}
+
+/** GET /api/me/profile：开发者档案。 */
+export interface MyProfile {
+  id: string;
+  name: string | null;
+  avatar: string | null;
+  email: string | null;
+  skills: string[];
+  github: string | null;
+  grade: string | null;
+  bio: string | null;
+}
+
+/** GET /api/activity：平台动态时间线。 */
+export interface ActivityItem {
+  kind: 'project' | 'demand' | 'demand_done';
+  id: number;
+  title: string;
+  at: string;
+  actor: UserRef | null;
+  project: { id: number; title: string } | null;
 }
 
 /** GET /api/directory/search：邀请成员时的候选人。 */

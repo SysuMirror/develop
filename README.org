@@ -45,6 +45,17 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 下载与预览都走预签名链接（默认 1 小时），不经过应用进程。未配置 MinIO 时附件接口返回 503，
 其余功能不受影响。
 
+** 项目与需求的元数据（2026-11-25）
+
+- 项目： =status= 取 =recruiting/active/paused/archived= ， =difficulty= 取 =starter/standard= ，
+  =tech_stack= 为字符串数组；项目列表支持 =status= / =tech= / =difficulty= 过滤。
+- 需求：新增 =acceptance= （验收标准，Markdown）、 =deadline= 、 =labels= （字符串数组）；
+  需求列表支持 =label= 过滤，详情页单独展示验收标准。改验收标准不算一次正文修订。
+- 开发者档案： =user_profile= 增加 =skills/github/grade/bio= ，通过 =GET/PATCH /api/me/profile=
+  读写；只用于本站展示，姓名头像邮箱仍以 UniSSO 目录为准。
+- 平台动态： =GET /api/activity?limit= = 合并最近新建项目、需求发布与需求完成三类事件。
+- 新建项目 / 新建需求支持从模板预填（纯前端，不创建仓库也不改目录）。
+
 需求接口没有按接单人与完成时间过滤的参数，首页按每页 100 条最多翻 5 页拉回后在前端切分；
 超过 500 条时「最近」两组只覆盖已拉取的 500 条，并在标题旁标注。
 

@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { qs } from '../api';
 import { useAuth } from '../auth';
-import { DEMAND_MAX_PAGES, DEMAND_PAGE_SIZE, latest, useApi, useDemandFeed } from '../hooks';
+import { latest, useApi, useDemandFeed } from '../hooks';
 import { APPLY_TYPE, DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
-import type { ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
+import type { ActivityItem, ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
 
 const PREVIEW = 5;
 const PAGE_SIZE = 100;
@@ -70,22 +70,16 @@ export default function HomePage() {
   const inbox = useApi<{ items: ApplyItem[] }>('/applies/inbox');
   const myProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-owner', pageSize: PAGE_SIZE })}`);
   const memberProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ filter: 'mine-member', pageSize: PAGE_SIZE })}`);
-  const allProjects = useApi<Paged<ProjectSummary>>(`/projects${qs({ pageSize: PAGE_SIZE })}`);
+  const activity = useApi<{ items: ActivityItem[] }>('/activity?limit=15');
   const feed = useDemandFeed();
 
   const inboxItems = inbox.data?.items ?? [];
   const myDemands = feed.items.filter((item) => item.status === 'accepted' && item.assignee?.id === myId);
   const ongoing = latest(myDemands, (item) => item.acceptedAt ?? item.createdAt, PREVIEW);
-  const published = latest(feed.items, (item) => item.createdAt, PREVIEW);
-  const completed = feed.items.filter((item) => item.status === 'completed');
-  const resolved = latest(completed, (item) => item.completedAt ?? item.createdAt, PREVIEW);
   const leading = myProjects.data?.items ?? [];
-  const createdProjects = latest(allProjects.data?.items ?? [], (item) => item.createdAt, PREVIEW);
   // 所有者/管理员与成员互斥，两个 total 相加即「我加入的全部项目」。
   const joinedCount = (myProjects.data?.total ?? 0) + (memberProjects.data?.total ?? 0);
   const joinedLoading = myProjects.loading || memberProjects.loading;
-
-  const feedHint = feed.truncated ? `（基于最近 ${DEMAND_MAX_PAGES * DEMAND_PAGE_SIZE} 条）` : '';
 
   const stats = [
     {
@@ -212,66 +206,56 @@ export default function HomePage() {
 
         <div>
           <div className="section-head">
-            <h2>与我无关</h2>
-            <span className="faint">平台上最近发生的事</span>
+            <h2>平台动态</h2>
+            <span className="faint">最近新建的项目、发布与完成的需求</span>
           </div>
 
-          <PreviewPanel
-            title="最近发布的需求"
-            count={`共 ${feed.total} 条${feedHint}`}
-            moreTo="/demands"
-            loading={feed.loading}
-            error={feed.error}
-            empty={published.length === 0}
-            emptyText="还没有需求发布。"
-          >
-            {published.map((demand) => (
-              <DemandRow key={demand.id} demand={demand} time={demand.createdAt} />
-            ))}
-          </PreviewPanel>
-
-          <PreviewPanel
-            title="最近被解决的需求"
-            count={`${completed.length} 条${feedHint}`}
-            moreTo="/demands?status=completed"
-            loading={feed.loading}
-            error={feed.error}
-            empty={resolved.length === 0}
-            emptyText="还没有已完成的需求。"
-          >
-            {resolved.map((demand) => (
-              <DemandRow
-                key={demand.id}
-                demand={demand}
-                time={demand.completedAt ?? demand.createdAt}
-                extra={demand.assignee ? ` · 接单人 ${displayName(demand.assignee)}` : null}
-              />
-            ))}
-          </PreviewPanel>
-
-          <PreviewPanel
-            title="最近新建的项目"
-            count={`共 ${allProjects.data?.total ?? 0} 个`}
-            moreTo="/projects"
-            loading={allProjects.loading}
-            error={allProjects.error ? allProjects.error.message : null}
-            empty={createdProjects.length === 0}
-            emptyText="还没有项目，去建一个。"
-          >
-            {createdProjects.map((project) => (
-              <div className="list__row" key={project.id}>
-                <div className="grow">
-                  <Link className="home-panel__title truncate" to={`/projects/${project.id}`}>
-                    {project.title}
-                  </Link>
-                  <div className="faint truncate">
-                    所有者 {displayName(project.owner)} · {project.memberCount} 位成员 ·{' '}
-                    <TimeAgo value={project.createdAt} />
-                  </div>
-                </div>
+          <section className="panel home-panel">
+            <div className="panel__head">
+              <h3>最近发生</h3>
+              <div className="home-panel__meta">
+                <span className="faint">{activity.data?.items.length ?? 0} 条</span>
               </div>
-            ))}
-          </PreviewPanel>
+            </div>
+            {activity.loading ? (
+              <Skeleton rows={3} />
+            ) : activity.error ? (
+              <div className="notice notice-error">{activity.error.message}</div>
+            ) : (activity.data?.items.length ?? 0) === 0 ? (
+              <div className="home-panel__empty">还没有动态。</div>
+            ) : (
+              <div className="list">
+                {(activity.data?.items ?? []).map((event) => (
+                  <div className="list__row" key={`${event.kind}-${event.id}-${event.at}`}>
+                    <div className="grow">
+                      <Link
+                        className="home-panel__title truncate"
+                        to={event.kind === 'project' ? `/projects/${event.id}` : `/demands/${event.id}`}
+                      >
+                        {event.title}
+                      </Link>
+                      <div className="faint truncate">
+                        {event.kind === 'project'
+                          ? '新建项目'
+                          : event.kind === 'demand_done'
+                            ? '完成需求'
+                            : '发布需求'}
+                        {event.project && event.kind !== 'project' ? (
+                          <>
+                            {' · '}
+                            <Link to={`/projects/${event.project.id}`}>{event.project.title}</Link>
+                          </>
+                        ) : null}
+                        {event.actor ? ` · ${displayName(event.actor)}` : ''}
+                        {' · '}
+                        <TimeAgo value={event.at} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

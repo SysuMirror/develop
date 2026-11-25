@@ -174,6 +174,24 @@ async function migrate(): Promise<void> {
     "UPDATE projects SET repo_urls = JSON_ARRAY(repo_url) WHERE repo_url IS NOT NULL AND repo_url <> '' AND repo_urls IS NULL",
   );
   await ensureColumn('projects', 'dev_notes', 'ALTER TABLE projects ADD COLUMN dev_notes TEXT NULL AFTER repo_url');
+  await ensureColumn(
+    'projects',
+    'status',
+    "ALTER TABLE projects ADD COLUMN status ENUM('recruiting','active','paused','archived') NOT NULL DEFAULT 'active' AFTER dev_notes",
+  );
+  await ensureColumn(
+    'projects',
+    'difficulty',
+    "ALTER TABLE projects ADD COLUMN difficulty ENUM('starter','standard') NOT NULL DEFAULT 'standard' AFTER status",
+  );
+  await ensureColumn('projects', 'tech_stack', 'ALTER TABLE projects ADD COLUMN tech_stack JSON NULL AFTER difficulty');
+  await ensureColumn('demands', 'acceptance', 'ALTER TABLE demands ADD COLUMN acceptance TEXT NULL AFTER detail');
+  await ensureColumn('demands', 'deadline', 'ALTER TABLE demands ADD COLUMN deadline DATETIME NULL AFTER acceptance');
+  await ensureColumn('demands', 'labels', 'ALTER TABLE demands ADD COLUMN labels JSON NULL AFTER deadline');
+  await ensureColumn('user_profile', 'skills', 'ALTER TABLE user_profile ADD COLUMN skills JSON NULL AFTER email');
+  await ensureColumn('user_profile', 'github', 'ALTER TABLE user_profile ADD COLUMN github VARCHAR(128) NULL AFTER skills');
+  await ensureColumn('user_profile', 'grade', 'ALTER TABLE user_profile ADD COLUMN grade VARCHAR(32) NULL AFTER github');
+  await ensureColumn('user_profile', 'bio', 'ALTER TABLE user_profile ADD COLUMN bio TEXT NULL AFTER grade');
   await ensureColumn('applies', 'resume_url', 'ALTER TABLE applies ADD COLUMN resume_url VARCHAR(2048) NULL AFTER note');
   await ensureColumn(
     'applies',

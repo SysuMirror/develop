@@ -2,6 +2,8 @@
 // 约定：DB 行用 snake_case（与 SELECT 出来的列一致），对外 JSON 的映射函数负责转 camelCase。
 
 export type Role = 'owner' | 'admin' | 'member';
+export type ProjectStatus = 'recruiting' | 'active' | 'paused' | 'archived';
+export type ProjectDifficulty = 'starter' | 'standard';
 export type ApplyType = 'leader' | 'participant';
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type ApplySource = 'web' | 'join';
@@ -51,6 +53,9 @@ export interface ProjectRow {
   repo_urls: unknown;
   /** 开发说明：只给项目成员看。 */
   dev_notes: string | null;
+  status: ProjectStatus;
+  difficulty: ProjectDifficulty;
+  tech_stack: unknown;
   leader_id: string | null;
   created_by: string | null;
   created_at: Date;
@@ -99,6 +104,10 @@ export interface DemandRow {
   project_id: number;
   title: string;
   detail: string | null;
+  /** 验收标准：提交与验收都对着它。 */
+  acceptance: string | null;
+  deadline: Date | null;
+  labels: unknown;
   status: DemandStatus;
   created_by: string;
   user_id: string | null;

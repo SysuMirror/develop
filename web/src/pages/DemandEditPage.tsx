@@ -49,15 +49,34 @@ export default function DemandEditPage() {
   return <DemandEditForm demand={data} />;
 }
 
+function toLocalInput(value: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function DemandEditForm({ demand }: { demand: DemandItem }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: demand.title, detail: demand.detail ?? '' });
+  const [form, setForm] = useState({
+    title: demand.title,
+    detail: demand.detail ?? '',
+    acceptance: demand.acceptance ?? '',
+    labels: demand.labels.join(', '),
+    deadline: toLocalInput(demand.deadline),
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const detailPath = `/demands/${demand.id}`;
-  const dirty = form.title !== demand.title || form.detail !== (demand.detail ?? '');
+  const dirty =
+    form.title !== demand.title ||
+    form.detail !== (demand.detail ?? '') ||
+    form.acceptance !== (demand.acceptance ?? '') ||
+    form.labels !== demand.labels.join(', ') ||
+    form.deadline !== toLocalInput(demand.deadline);
 
   function back() {
     navigate(detailPath);
@@ -74,7 +93,13 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/demands/${demand.id}`, { title, detail: form.detail });
+      await api.patch(`/demands/${demand.id}`, {
+        title,
+        detail: form.detail,
+        acceptance: form.acceptance.trim() || null,
+        labels: form.labels.split(',').map((item) => item.trim()).filter(Boolean),
+        deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+      });
       toast.push('需求已保存。', 'success');
       back();
     } catch (err) {
@@ -124,11 +149,40 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
         所属项目：{demand.project.title}
       </div>
 
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="标签" hint="逗号分隔">
+          <input
+            className="input"
+            value={form.labels}
+            placeholder="前端, 文档"
+            onChange={(event) => setForm({ ...form, labels: event.target.value })}
+          />
+        </Field>
+        <Field label="期望完成时间" hint="留空表示不限期">
+          <input
+            className="input"
+            type="datetime-local"
+            value={form.deadline}
+            onChange={(event) => setForm({ ...form, deadline: event.target.value })}
+          />
+        </Field>
+      </div>
+
       <MarkdownEditor
         id="demand-detail"
         value={form.detail}
         onChange={(detail) => setForm({ ...form, detail })}
-        placeholder={'# 背景\n…\n\n# 验收标准\n…'}
+        placeholder={'# 背景\n…\n\n# 期望效果\n…'}
+        onSubmitShortcut={() => void save()}
+      />
+
+      <MarkdownEditor
+        id="demand-acceptance"
+        label="验收标准（Markdown）"
+        value={form.acceptance}
+        onChange={(acceptance) => setForm({ ...form, acceptance })}
+        placeholder={'- [ ] 验收项一\n- [ ] 验收项二'}
+        previewEmpty="写清楚怎样算完成。"
         onSubmitShortcut={() => void save()}
       />
     </div>

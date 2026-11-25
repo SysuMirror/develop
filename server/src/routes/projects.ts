@@ -53,6 +53,54 @@ function cleanDevNotes(raw: unknown): string | null {
   return value ? value : null;
 }
 
+const PROJECT_STATUSES = ['recruiting', 'active', 'paused', 'archived'] as const;
+const PROJECT_DIFFICULTIES = ['starter', 'standard'] as const;
+
+function cleanStatus(raw: unknown, fallback: (typeof PROJECT_STATUSES)[number] = 'active') {
+  if (raw == null || raw === '') return fallback;
+  const value = String(raw);
+  if (!(PROJECT_STATUSES as readonly string[]).includes(value)) throw badRequest('BAD_STATUS', '项目状态不合法');
+  return value as (typeof PROJECT_STATUSES)[number];
+}
+
+function cleanDifficulty(raw: unknown, fallback: (typeof PROJECT_DIFFICULTIES)[number] = 'standard') {
+  if (raw == null || raw === '') return fallback;
+  const value = String(raw);
+  if (!(PROJECT_DIFFICULTIES as readonly string[]).includes(value)) {
+    throw badRequest('BAD_DIFFICULTY', '项目难度不合法');
+  }
+  return value as (typeof PROJECT_DIFFICULTIES)[number];
+}
+
+/** 技术栈标签：去重、限长、最多 10 个。 */
+function cleanTechStack(raw: unknown): string[] {
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(',');
+  const out: string[] = [];
+  for (const item of list) {
+    const value = String(item ?? '').trim();
+    if (!value) continue;
+    if (value.length > 24) throw badRequest('BAD_TECH', '单个技术标签不超过 24 字');
+    if (!out.includes(value)) out.push(value);
+  }
+  if (out.length > 10) throw badRequest('TOO_MANY_TECH', '技术标签最多 10 个');
+  return out;
+}
+
+/** JSON 列在 mysql2 里可能是数组或字符串，统一读成数组。 */
+function jsonListOf(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((item) => String(item)).filter(Boolean);
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item)).filter(Boolean);
+    } catch {
+      /* 坏数据按空处理 */
+    }
+  }
+  return [];
+}
+
 // 成员关系变更后，不再属于任何项目的用户撤销 UniSSO 资格；失败不阻塞业务。
 async function syncAfterRemoval(userId: string): Promise<void> {
   try {
@@ -63,7 +111,8 @@ async function syncAfterRemoval(userId: string): Promise<void> {
 }
 
 const PROJECT_SUMMARY = `
-  SELECT p.id, p.title, p.misc, p.repo_url, p.repo_urls, p.created_at, p.updated_at, p.leader_id,
+  SELECT p.id, p.title, p.misc, p.repo_url, p.repo_urls, p.dev_notes,
+         p.status, p.difficulty, p.tech_stack, p.created_at, p.updated_at, p.leader_id,
          (SELECT COUNT(*) FROM project_member m2 WHERE m2.project_id = p.id) AS member_count,
          (SELECT COUNT(*) FROM demands d3 WHERE d3.project_id = p.id AND d3.status = 'waiting') AS waiting_demand_count,
          (SELECT COUNT(*) FROM applies a2 WHERE a2.project_id = p.id AND a2.status = 'waiting') AS pending_apply_count,
@@ -96,6 +145,9 @@ function mapSummary(row: ProjectSummaryRow, people: Awaited<ReturnType<typeof ge
     title: row.title,
     misc: row.misc,
     repoUrls: repoUrlsOf(row),
+    status: row.status,
+    difficulty: row.difficulty,
+    techStack: jsonListOf(row.tech_stack),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     owner: row.leader_id ? userRef(row.leader_id, people.get(row.leader_id)) : null,
@@ -131,6 +183,21 @@ router.get(
     if (term) {
       conditions.push('p.title LIKE ?');
       filterParams.push(term);
+    }
+    const statusFilter = String(req.query.status || '');
+    if ((PROJECT_STATUSES as readonly string[]).includes(statusFilter)) {
+      conditions.push('p.status = ?');
+      filterParams.push(statusFilter);
+    }
+    const difficultyFilter = String(req.query.difficulty || '');
+    if ((PROJECT_DIFFICULTIES as readonly string[]).includes(difficultyFilter)) {
+      conditions.push('p.difficulty = ?');
+      filterParams.push(difficultyFilter);
+    }
+    const tech = String(req.query.tech || '').trim();
+    if (tech) {
+      conditions.push('JSON_CONTAINS(COALESCE(p.tech_stack, JSON_ARRAY()), JSON_QUOTE(?))');
+      filterParams.push(tech);
     }
     if (filter === 'mine-owner' || filter === 'mine-leader') {
       conditions.push(
@@ -186,6 +253,14 @@ router.get(
       ...demands.map((row) => row.user_id),
     ]);
     const role = await roleOf(project, user.id);
+    const memberIds = members.map((row) => row.user_id);
+    const skillRows = memberIds.length
+      ? await query<{ user_id: string; skills: unknown }>(
+          `SELECT user_id, skills FROM user_profile WHERE user_id IN (${memberIds.map(() => '?').join(',')})`,
+          memberIds,
+        )
+      : [];
+    const skillsById = new Map(skillRows.map((row) => [row.user_id, jsonListOf(row.skills)]));
     const owners = members
       .filter((row) => row.role === 'owner')
       .map((row) => ({
@@ -203,6 +278,7 @@ router.get(
         userId: row.user_id,
         name: people.get(row.user_id)?.name ?? null,
         avatar: people.get(row.user_id)?.avatar ?? null,
+        skills: skillsById.get(row.user_id) ?? [],
         role: row.role,
         isPrimary: row.user_id === project.leader_id,
         joinedAt: row.created_at,
@@ -239,11 +315,26 @@ router.post(
       req.body?.repoUrls !== undefined ? req.body.repoUrls : req.body?.repoUrl !== undefined ? [req.body.repoUrl] : [],
     );
     const devNotes = cleanDevNotes(req.body?.devNotes);
+    const status = cleanStatus(req.body?.status);
+    const difficulty = cleanDifficulty(req.body?.difficulty);
+    const techStack = cleanTechStack(req.body?.techStack);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '项目名称必填，且不超过 128 字');
     const projectId = await withTx(async (conn) => {
       const [result] = await conn.query<ResultSetHeader>(
-        'INSERT INTO projects (title, misc, repo_url, repo_urls, dev_notes, leader_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [title, misc, repoUrls[0] ?? null, JSON.stringify(repoUrls), devNotes, user.id, user.id],
+        `INSERT INTO projects (title, misc, repo_url, repo_urls, dev_notes, status, difficulty, tech_stack, leader_id, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          title,
+          misc,
+          repoUrls[0] ?? null,
+          JSON.stringify(repoUrls),
+          devNotes,
+          status,
+          difficulty,
+          JSON.stringify(techStack),
+          user.id,
+          user.id,
+        ],
       );
       const newId = result.insertId;
       await conn.query('INSERT INTO project_member (project_id, user_id, role) VALUES (?, ?, ?)', [
@@ -382,6 +473,9 @@ router.patch(
       patch.repo_url = repoUrls[0] ?? null;
     }
     if (req.body?.devNotes !== undefined) patch.dev_notes = cleanDevNotes(req.body.devNotes);
+    if (req.body?.status !== undefined) patch.status = cleanStatus(req.body.status, project.status);
+    if (req.body?.difficulty !== undefined) patch.difficulty = cleanDifficulty(req.body.difficulty, project.difficulty);
+    if (req.body?.techStack !== undefined) patch.tech_stack = JSON.stringify(cleanTechStack(req.body.techStack));
     if (Object.keys(patch).length === 0) throw badRequest('NOTHING_TO_UPDATE', '没有可更新的字段');
     await query('UPDATE projects SET ? WHERE id = ?', [patch, project.id]);
     const updated = await loadSummary(user.id, project.id);

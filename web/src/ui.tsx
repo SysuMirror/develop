@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatTime } from './api';
-import type { ApplyStatus, ApplyType, DemandStatus, Role } from './types';
+import type { ApplyStatus, ApplyType, DemandStatus, ProjectDifficulty, ProjectStatus, Role } from './types';
 
 export type Tone = 'gray' | 'amber' | 'green' | 'red' | 'blue';
 export type NoticeTone = 'info' | 'success' | 'error';
@@ -29,6 +29,18 @@ export const ROLE: Record<Role, StatusMeta> = {
   owner: { label: '所有者', tone: 'blue' },
   admin: { label: '管理员', tone: 'amber' },
   member: { label: '成员', tone: 'gray' },
+};
+
+export const PROJECT_STATUS: Record<ProjectStatus, StatusMeta> = {
+  recruiting: { label: '招募中', tone: 'green' },
+  active: { label: '进行中', tone: 'blue' },
+  paused: { label: '暂停', tone: 'amber' },
+  archived: { label: '已归档', tone: 'gray' },
+};
+
+export const PROJECT_DIFFICULTY: Record<ProjectDifficulty, StatusMeta> = {
+  starter: { label: '入门友好', tone: 'green' },
+  standard: { label: '进阶', tone: 'blue' },
 };
 
 export const APPLY_TYPE: Record<ApplyType, StatusMeta> = {

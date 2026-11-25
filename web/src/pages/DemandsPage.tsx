@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { qs } from '../api';
+import { formatTime, qs } from '../api';
 import { useApi, useDebounced } from '../hooks';
-import { DEMAND_STATUS, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
+import { DEMAND_STATUS, Badge, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem, Paged } from '../types';
 
 interface TabItem {
@@ -29,12 +29,14 @@ const SCOPES: TabItem[] = [
 export default function DemandsPage() {
   const [status, setStatus] = useState('');
   const [scope, setScope] = useState('');
+  const [label, setLabel] = useState('');
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const q = useDebounced(term);
+  const labelQ = useDebounced(label);
   const pageSize = 15;
   const { data, loading, error } = useApi<Paged<DemandItem>>(
-    `/demands${qs({ status, scope, q, page, pageSize })}`,
+    `/demands${qs({ status, scope, label: labelQ, q, page, pageSize })}`,
   );
   const items = data?.items ?? [];
 
@@ -56,6 +58,7 @@ export default function DemandsPage() {
                 <th>项目</th>
                 <th>发布者</th>
                 <th>接单人</th>
+                <th>截止</th>
                 <th>状态</th>
               </tr>
             </thead>
@@ -66,12 +69,28 @@ export default function DemandsPage() {
                     <Link className="cell-title" to={`/demands/${demand.id}`}>
                       {demand.title}
                     </Link>
+                    {demand.labels.length > 0 ? (
+                      <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                        {demand.labels.map((item) => (
+                          <Badge key={item} tone="gray">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
                   </td>
                   <td>
                     <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
                   </td>
                   <td>{demand.creator?.name || <span className="faint">—</span>}</td>
                   <td>{demand.assignee ? displayName(demand.assignee) : <span className="faint">—</span>}</td>
+                  <td>
+                    {demand.deadline ? (
+                      <span className="faint">{formatTime(demand.deadline)}</span>
+                    ) : (
+                      <span className="faint">—</span>
+                    )}
+                  </td>
                   <td>
                     <StatusBadge map={DEMAND_STATUS} value={demand.status} />
                     <div className="faint">
@@ -91,10 +110,20 @@ export default function DemandsPage() {
                   <span className="list-card__title">{demand.title}</span>
                   <StatusBadge map={DEMAND_STATUS} value={demand.status} />
                 </div>
+                {demand.labels.length > 0 ? (
+                  <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                    {demand.labels.map((item) => (
+                      <Badge key={item} tone="gray">
+                        {item}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="list-card__meta">
                   <span>{demand.project.title}</span>
                   <span>发布者 {demand.creator?.name || '—'}</span>
                   <span>{demand.assignee ? `接单 ${displayName(demand.assignee)}` : '待认领'}</span>
+                  {demand.deadline ? <span>截止 {formatTime(demand.deadline)}</span> : null}
                   <span>
                     <TimeAgo value={demand.createdAt} />
                   </span>
@@ -157,6 +186,20 @@ export default function DemandsPage() {
             value={term}
             onChange={(event) => {
               setTerm(event.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+      </div>
+      <div className="toolbar" style={{ marginTop: -6 }}>
+        <span className="faint">按标签筛选</span>
+        <div className="search">
+          <input
+            className="input"
+            placeholder="例如：前端 / 后端 / 文档"
+            value={label}
+            onChange={(event) => {
+              setLabel(event.target.value);
               setPage(1);
             }}
           />

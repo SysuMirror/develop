@@ -12,6 +12,8 @@ import appliesRouter from './routes/applies.ts';
 import demandsRouter from './routes/demands.ts';
 import filesRouter from './routes/files.ts';
 import joinRouter from './routes/join.ts';
+import profileRouter from './routes/profile.ts';
+import activityRouter from './routes/activity.ts';
 import projectsRouter from './routes/projects.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +74,8 @@ export function createApp(): express.Express {
   app.use('/api', wrap(auth.requireDeveloper));
   app.use('/api', projectsRouter);
   app.use('/api', filesRouter);
+  app.use('/api', profileRouter);
+  app.use('/api', activityRouter);
   app.use('/api', appliesRouter);
   app.use('/api', demandsRouter);
   app.use('/api', (_req, res) => {

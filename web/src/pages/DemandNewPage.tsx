@@ -51,12 +51,17 @@ export default function DemandNewPage() {
 function DemandNewForm({ project }: { project: ProjectDetail }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: '', detail: '' });
+  const [form, setForm] = useState({ title: '', detail: '', acceptance: '', labels: '', deadline: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const projectPath = `/projects/${project.id}`;
-  const dirty = form.title.trim() !== '' || form.detail.trim() !== '';
+  const dirty =
+    form.title.trim() !== '' ||
+    form.detail.trim() !== '' ||
+    form.acceptance.trim() !== '' ||
+    form.labels.trim() !== '' ||
+    form.deadline !== '';
 
   function leave() {
     if (dirty && !window.confirm('放弃尚未发布的需求？')) return;
@@ -72,6 +77,9 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
       const created = await api.post<{ id: number }>(`/projects/${project.id}/demands`, {
         title,
         detail: form.detail.trim() || null,
+        acceptance: form.acceptance.trim() || null,
+        labels: form.labels.split(',').map((item) => item.trim()).filter(Boolean),
+        deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
       });
       toast.push('需求已发布。', 'success');
       navigate(`/demands/${created.id}`);
@@ -109,6 +117,8 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
 
       {error ? <div className="notice notice-error">{error}</div> : null}
 
+      <DemandTemplatePicker onPick={(patch) => setForm((prev) => ({ ...prev, ...patch }))} />
+
       <Field label="需求标题" hint={`${form.title.trim().length} / 128`}>
         <input
           className="input"
@@ -119,6 +129,25 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         />
       </Field>
 
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="标签" hint="逗号分隔，例如：前端, 文档">
+          <input
+            className="input"
+            value={form.labels}
+            placeholder="前端, 后端, 文档"
+            onChange={(event) => setForm({ ...form, labels: event.target.value })}
+          />
+        </Field>
+        <Field label="期望完成时间" hint="留空表示不限期">
+          <input
+            className="input"
+            type="datetime-local"
+            value={form.deadline}
+            onChange={(event) => setForm({ ...form, deadline: event.target.value })}
+          />
+        </Field>
+      </div>
+
       <div className="faint" style={{ marginBottom: 14 }}>
         所属项目：{project.title}
       </div>
@@ -128,10 +157,71 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         label="需求细节（Markdown）"
         value={form.detail}
         onChange={(detail) => setForm({ ...form, detail })}
-        placeholder={'# 背景\n…\n\n# 验收标准\n…'}
+        placeholder={'# 背景\n…\n\n# 期望效果\n…'}
         previewEmpty="在左侧写需求细节，这里会实时渲染。"
         onSubmitShortcut={() => void save()}
       />
+
+      <MarkdownEditor
+        id="demand-new-acceptance"
+        label="验收标准（Markdown）"
+        value={form.acceptance}
+        onChange={(acceptance) => setForm({ ...form, acceptance })}
+        placeholder={'- [ ] 列表能按状态筛选\n- [ ] 刷新后筛选条件保留'}
+        previewEmpty="写清楚怎样算完成，提交与验收都以它为准。"
+        onSubmitShortcut={() => void save()}
+      />
+    </div>
+  );
+}
+
+interface DemandTemplate {
+  label: string;
+  detail: string;
+  acceptance: string;
+  labels: string;
+}
+
+const DEMAND_TEMPLATES: DemandTemplate[] = [
+  {
+    label: '功能开发',
+    detail: '## 背景\n\n（为什么要做）\n\n## 期望效果\n\n（用户能看到/用到什么）\n\n## 涉及范围\n\n- 页面：\n- 接口：',
+    acceptance: '- [ ] 功能可用，路径：\n- [ ] 有基础错误处理\n- [ ] 不破坏现有功能',
+    labels: '前端, 后端',
+  },
+  {
+    label: '缺陷修复',
+    detail: '## 复现步骤\n\n1. \n2. \n\n## 实际表现\n\n\n## 期望表现\n\n',
+    acceptance: '- [ ] 按复现步骤不再出现\n- [ ] 补充回归用例或说明',
+    labels: '缺陷',
+  },
+  {
+    label: '文档 / 整理',
+    detail: '## 范围\n\n\n## 交付物\n\n- [ ] 文档路径：',
+    acceptance: '- [ ] 内容准确、可执行\n- [ ] 链接可用',
+    labels: '文档',
+  },
+];
+
+function DemandTemplatePicker({ onPick }: { onPick: (patch: Partial<DemandTemplate>) => void }) {
+  return (
+    <div className="panel" style={{ marginBottom: 14 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="faint">从模板开始：</span>
+        {DEMAND_TEMPLATES.map((template) => (
+          <button
+            key={template.label}
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() =>
+              onPick({ detail: template.detail, acceptance: template.acceptance, labels: template.labels })
+            }
+          >
+            {template.label}
+          </button>
+        ))}
+        <span className="faint">会覆盖细节、验收标准与标签</span>
+      </div>
     </div>
   );
 }
