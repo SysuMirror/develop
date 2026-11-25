@@ -1971,6 +1971,8 @@ button {
     padding-left: calc(var(--page-pad) + env(safe-area-inset-left));
     padding-right: calc(var(--page-pad) + env(safe-area-inset-right));
     scrollbar-width: none;
+    /* 横滑时右缘淡出，提示还有选项没露出来。 */
+    mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
   }
 
   .tabs::-webkit-scrollbar {
