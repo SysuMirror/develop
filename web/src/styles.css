@@ -2159,3 +2159,13 @@ button {
     -webkit-box-orient: vertical;
   }
 }
+
+/* 列表说明默认三行：一行的信息量不够，三行足够表达"这是什么、为什么值得来" */
+.project-row__desc {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.6;
+}

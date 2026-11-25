@@ -60,7 +60,7 @@ function excerptOf(text: string | null): string {
     .replace(/[#>*_`~-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 140);
+    .slice(0, 240);
 }
 
 export default function ProjectsPage() {
