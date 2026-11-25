@@ -218,12 +218,13 @@ export default function HomePage() {
           <div className="todo-grid">
             {todos.map((todo) => (
               <Link className="todo-card" key={todo.key} to={todo.to}>
-                <span className="todo-card__top">
+                <span className="todo-card__title">{todo.title}</span>
+                <span className="todo-card__meta">
                   <span className="todo-card__kind">{todo.kind}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{todo.meta}</span>
                   {todo.status ? <StatusBadge map={DEMAND_STATUS} value={todo.status} /> : null}
                 </span>
-                <span className="todo-card__title">{todo.title}</span>
-                <span className="todo-card__meta">{todo.meta}</span>
                 <span className="todo-card__action">{todo.action}</span>
               </Link>
             ))}

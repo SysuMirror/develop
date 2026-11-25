@@ -1019,13 +1019,6 @@ button {
   max-width: 380px;
 }
 
-.todo-card__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .todo-card__kind {
   font-size: 11.5px;
   font-weight: 650;
@@ -1043,11 +1036,14 @@ button {
 }
 
 .todo-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: var(--ink-faint);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .todo-card__action {
@@ -2929,5 +2925,134 @@ button {
 
   .project-row__action .btn {
     width: 100%;
+  }
+}
+
+/* 手机端：概览分区不再套白卡，改成整块列表；项目行收成两行说明 */
+@media (max-width: 720px) {
+  .home-section {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+    margin-top: 20px;
+  }
+
+  .home-section__head {
+    padding: 0 2px;
+    margin-bottom: 8px;
+  }
+
+  .home-section__head h2 {
+    font-size: 15px;
+  }
+
+  .todo-grid,
+  .mini-grid,
+  .activity-grid {
+    display: block;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  /* 待办卡片变成「一行一条」：标题与两行说明在左，动作在右。 */
+  .todo-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'title action'
+      'meta action';
+    column-gap: 12px;
+    row-gap: 2px;
+    padding: 12px 14px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+
+  .todo-card + .todo-card {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .todo-card__title {
+    grid-area: title;
+    font-size: 14.5px;
+    -webkit-line-clamp: 1;
+  }
+
+  .todo-card__meta {
+    grid-area: meta;
+  }
+
+  .todo-card__action {
+    grid-area: action;
+    align-self: center;
+    margin: 0;
+  }
+
+  .mini-project {
+    padding: 12px 14px;
+  }
+
+  .mini-project + .mini-project {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .mini-project:only-child,
+  .todo-card:only-child {
+    max-width: none;
+  }
+
+  .activity-item {
+    padding: 11px 14px;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .activity-item + .activity-item {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .activity-item:hover {
+    background: none;
+  }
+
+  .activity-item .faint {
+    font-size: 11.5px;
+  }
+
+  /* 项目列表：说明两行、技术标签最多三个，单行信息更短。 */
+  .project-row {
+    padding: 12px 14px;
+  }
+
+  .project-row__desc {
+    -webkit-line-clamp: 2;
+    font-size: 13px;
+  }
+
+  .project-row__tech .tag:nth-child(n + 4) {
+    display: none;
+  }
+
+  .project-row__meta {
+    font-size: 11.5px;
+    gap: 5px;
+  }
+}
+
+@media (max-width: 720px) {
+  /* 手机端数字卡再压一档：提示只留一行，避免四张卡吃掉半屏。 */
+  .stat-card {
+    padding: 10px 12px;
+  }
+
+  .stat-card__hint {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
