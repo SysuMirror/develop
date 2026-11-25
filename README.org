@@ -136,7 +136,7 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
 
 - =GET /api/projects= ： =q= 同时匹配标题、说明与技术栈； =status= 取四个项目状态之一，
   =difficulty= 取 =starter= / =standard= ， =tech= 按技术栈精确过滤。 =filter= 取 =all= /
-  =mine-owner= / =mine-member= / =recruiting= （有 waiting 需求的项目），按创建时间倒序，分页返回
+  =mine-owner= （所有者或管理员）/ =mine-member= （普通成员）/ =recruiting= （有 waiting 需求的项目），按创建时间倒序，分页返回
   =items/total/page/pageSize= ，每行带 =myRole= 与 =myApplyStatus= 。
 - =GET /api/projects/:id= ：成员按所有者、管理员、成员排序、加入时间排序；需求按 waiting → accepted →
   completed 排序。返回 =permissions= （ =isMember= / =isLeader= / =canApply= / =canManage= ），

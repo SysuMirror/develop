@@ -203,14 +203,15 @@ router.get(
       conditions.push('JSON_CONTAINS(COALESCE(p.tech_stack, JSON_ARRAY()), JSON_QUOTE(?))');
       filterParams.push(tech);
     }
+    // 「我负责的」= 所有者与管理员（两者都能管理项目）；「我参与的」只算普通成员，两张列表不重叠。
     if (filter === 'mine-owner' || filter === 'mine-leader') {
       conditions.push(
-        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role = 'owner')",
+        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role IN ('owner','admin'))",
       );
       filterParams.push(user.id);
     } else if (filter === 'mine-member') {
       conditions.push(
-        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role IN ('admin','member'))",
+        "EXISTS (SELECT 1 FROM project_member m WHERE m.project_id = p.id AND m.user_id = ? AND m.role = 'member')",
       );
       filterParams.push(user.id);
     } else if (filter === 'recruiting') {
