@@ -34,24 +34,22 @@ export default function NoQualificationPage() {
 
   if (!unknown) {
     return (
-      <div style={{ maxWidth: 560, margin: '24px auto' }}>
-        <h1 className="page-title">正在前往 SSE 集市完成开发者认证</h1>
+      <div className="narrow-page">
+        <h1 className="page-title">需要开发者资格</h1>
         <p className="page-sub">
-          用同一个统一身份登录集市后会自动开通开发者资格；回来刷新一下就都能用了。
+          开发者平台面向学院开发者开放。用统一身份登录一次 SSE 集市即可获得资格，回到这里刷新就能使用。
         </p>
-        <div className="panel" style={{ marginTop: 20 }}>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <div className="panel">
+          <div className="page-actions">
             <a className="btn btn-primary" href={JOIN_PROFILE_URL}>
-              前往集市（个人资料）
+              前往 SSE 集市
             </a>
-            <button type="button" className="btn" onClick={recheck} disabled={checking}>
-              {checking ? '检查中…' : '我已经完成了，重新检查'}
+            <button type="button" className="btn btn-secondary" onClick={recheck} disabled={checking}>
+              {checking ? '检查中…' : '已完成，重新检查'}
             </button>
           </div>
           {error ? (
-            <div className="notice notice-error" style={{ marginTop: 12 }}>
-              {error}
-            </div>
+            <div className="notice notice-error narrow-notice">{error}</div>
           ) : null}
         </div>
       </div>
@@ -59,16 +57,16 @@ export default function NoQualificationPage() {
   }
 
   return (
-    <div style={{ maxWidth: 560, margin: '24px auto' }}>
+    <div className="narrow-page">
       <h1 className="page-title">暂时无法确认开发者资格</h1>
-      <p className="page-sub">平台暂时连不上 SSE 统一身份服务，稍后可以再检查一次。</p>
+      <p className="page-sub">统一身份服务暂时不可用，请稍后再试。</p>
 
-      <div className="panel" style={{ marginTop: 20 }}>
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+      <div className="panel">
+        <div className="page-actions">
           <a className="btn btn-primary" href={JOIN_PROFILE_URL}>
-            前往集市（个人资料）
+            前往 SSE 集市
           </a>
-          <button type="button" className="btn" onClick={recheck} disabled={checking}>
+          <button type="button" className="btn btn-secondary" onClick={recheck} disabled={checking}>
             {checking ? '检查中…' : '重新检查'}
           </button>
           <button type="button" className="btn btn-ghost" onClick={() => logout()}>
@@ -76,7 +74,7 @@ export default function NoQualificationPage() {
           </button>
         </div>
         {error ? (
-          <div className="notice notice-error" style={{ marginTop: 12 }}>
+          <div className="notice notice-error narrow-notice">
             {error}
           </div>
         ) : null}

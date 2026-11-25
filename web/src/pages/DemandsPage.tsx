@@ -191,7 +191,7 @@ export default function DemandsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">需求</h1>
-          <p className="page-sub">项目成员发布的任务。接单人提交完成后由发布者验收；也可以挂起需求。</p>
+          <p className="page-sub">各项目公开的任务。挑一个能上手的接下来，交付后由发布者验收。</p>
         </div>
       </div>
 

@@ -131,7 +131,7 @@ interface MobileFiltersProps {
 /** 窄屏下的「筛选」抽屉：次要条件全部收在这里，列表上方只留搜索与主筛选。 */
 export function MobileFilters({ open, onClose, onReset, activeCount, children }: MobileFiltersProps) {
   return (
-    <Modal open={open} title="筛选" sub="条件会在关闭后立即生效。" onClose={onClose}>
+    <Modal open={open} title="筛选" sub="选中后立即生效。" onClose={onClose}>
       <div className="filtersheet">{children}</div>
       <div className="filtersheet__foot">
         <button type="button" className="btn btn-ghost" onClick={onReset} disabled={activeCount === 0}>

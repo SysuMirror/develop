@@ -204,7 +204,7 @@ export default function ProjectsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">项目</h1>
-          <p className="page-sub">每个项目有所有者、管理员与成员；所有者与管理员审批加入申请、邀请成员、发布需求。</p>
+          <p className="page-sub">学院里的项目都在这里。看看大家在做什么，也可以带着想法发起一个新项目。</p>
         </div>
         <div className="page-actions">
           <button type="button" className="btn btn-primary" onClick={() => navigate('/projects/new')}>

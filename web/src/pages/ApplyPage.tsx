@@ -85,7 +85,7 @@ function ApplyForm({ project }: { project: ProjectDetail }) {
         <div>
           <h1 className="page-title">申请加入</h1>
           <p className="page-sub">
-            {project.title} · 项目所有者或管理员会在项目页看到你的申请并做出决定；一条申请等待审批时不能重复提交。
+            {project.title} · 写下你能承担的部分，所有者看到后会尽快处理；同一条申请等待审批期间不能重复提交。
           </p>
         </div>
       </div>

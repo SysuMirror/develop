@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { Avatar, Skeleton } from '../ui';
+import { Avatar, Field, Skeleton } from '../ui';
 import type { DevIdentity } from '../types';
 
 function safeTarget(value: string | null): string {
@@ -61,60 +61,57 @@ export default function LoginPage() {
   if (loading) return <Skeleton rows={4} />;
 
   return (
-    <div style={{ maxWidth: 480, margin: '24px auto' }}>
+    <div className="narrow-page">
       <h1 className="page-title">登录</h1>
-      <p className="page-sub">
-        使用 SSE 统一身份邮箱与密码登录。已经在集市、iwiki、招聘等站点登录过的，直接进来即可。
-      </p>
+      <p className="page-sub">使用学院统一身份账号登录，继续参与项目开发与需求协作。</p>
 
-      <div className="panel" style={{ marginTop: 20 }}>
-        <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
-          <label className="faint" htmlFor="login-email">邮箱</label>
-          <input
-            id="login-email"
-            className="input"
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@mail2.sysu.edu.cn"
-            required
-          />
-          <label className="faint" htmlFor="login-password">密码</label>
-          <input
-            id="login-password"
-            className="input"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%', marginTop: 6 }}>
+      <div className="panel auth-panel">
+        <form className="auth-form" onSubmit={submit}>
+          <Field label="邮箱" htmlFor="login-email">
+            <input
+              id="login-email"
+              className="input"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@mail2.sysu.edu.cn"
+              required
+            />
+          </Field>
+          <Field label="密码" htmlFor="login-password">
+            <input
+              id="login-password"
+              className="input"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </Field>
+          <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
             {busy ? '登录中…' : '登录'}
           </button>
+          <p className="faint auth-note">账号由 SSE 统一身份提供；忘记密码或账号异常，请联系平台管理员。</p>
         </form>
-        {error ? <div className="notice notice-error" style={{ marginTop: 12 }}>{error}</div> : null}
+        {error ? <div className="notice notice-error auth-error">{error}</div> : null}
 
         {identities && identities.length > 0 ? (
           <>
-            <div className="section-head" style={{ margin: '20px 0 8px' }}>
+            <div className="section-head auth-dev-head">
               <h2>开发身份模拟</h2>
               <span className="faint">DEV_LOGIN 开启时可用</span>
             </div>
-            {identities.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                className="list__row"
-                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
-                onClick={() => pick(item.id)}
-              >
-                <Avatar name={item.name} />
-                <span className="grow">{item.name}</span>
-                <span className="faint">#{item.id}</span>
-              </button>
-            ))}
+            <div className="list">
+              {identities.map((item) => (
+                <button type="button" key={item.id} className="dev-identity" onClick={() => pick(item.id)}>
+                  <Avatar name={item.name} />
+                  <span className="grow">{item.name}</span>
+                  <span className="faint">#{item.id}</span>
+                </button>
+              ))}
+            </div>
           </>
         ) : null}
       </div>

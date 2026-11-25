@@ -165,6 +165,7 @@ function MobileNav() {
 
 function Header() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   return (
     <header className="site-header">
       <div className="site-header__inner">
@@ -172,13 +173,18 @@ function Header() {
           SSE_Market
           <span className="brand__mono">developer</span>
         </Link>
-        <nav className="site-nav">
-          {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end}>
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+        {/* 未登录时不显示业务导航：点了也只会被弹回登录页。 */}
+        {user ? (
+          <nav className="site-nav">
+            {NAV.map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end}>
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+        ) : (
+          <span className="site-nav" />
+        )}
         {user ? (
           <div className="row" style={{ gap: 6 }}>
             <Link className="user-chip" to="/me">
@@ -190,7 +196,7 @@ function Header() {
               退出
             </button>
           </div>
-        ) : (
+        ) : location.pathname === '/login' ? null : (
           <Link className="btn btn-primary btn-sm" to="/login">
             登录
           </Link>
@@ -205,7 +211,7 @@ function Footer() {
     <footer className="site-footer">
       <div className="site-footer__inner">
         <span>SSE_Market · 开发者平台</span>
-        <span>软件工程学院 · 项目 / 申请 / 需求撮合</span>
+        <span>软件工程学院 · 项目协作与需求发布</span>
       </div>
     </footer>
   );

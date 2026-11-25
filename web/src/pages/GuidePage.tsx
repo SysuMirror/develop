@@ -51,7 +51,7 @@ export default function GuidePage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">上手</h1>
-          <p className="page-sub">新人先读这三篇：环境、分支提交、需求流程。内容随仓库走，改文档走 PR。</p>
+          <p className="page-sub">从环境准备到提交、验收的完整流程，读完就能开始接手任务。</p>
         </div>
       </div>
 

@@ -164,13 +164,15 @@ export function Modal({ open, title, sub, onClose, children, footer, wide }: Mod
 interface FieldProps {
   label: ReactNode;
   hint?: ReactNode;
+  /** 关联到控件 id，让点标题也能聚焦输入框。 */
+  htmlFor?: string;
   children?: ReactNode;
 }
 
-export function Field({ label, hint, children }: FieldProps) {
+export function Field({ label, hint, htmlFor, children }: FieldProps) {
   return (
     <div className="field">
-      <label>{label}</label>
+      <label htmlFor={htmlFor}>{label}</label>
       {children}
       {hint ? <span className="faint">{hint}</span> : null}
     </div>

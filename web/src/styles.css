@@ -1221,6 +1221,70 @@ button {
   }
 }
 
+/* 登录与资格页：窄栏、单列，不和主应用的宽列表混在一起。 */
+.narrow-page {
+  max-width: 460px;
+  margin: 8px auto 0;
+}
+
+.narrow-page .page-actions {
+  justify-content: flex-start;
+  margin-left: 0;
+}
+
+.auth-panel {
+  margin-top: 18px;
+}
+
+.auth-form {
+  display: grid;
+}
+
+.auth-form .field {
+  margin-bottom: 12px;
+}
+
+.auth-error {
+  margin-top: 12px;
+}
+
+.auth-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.narrow-notice {
+  margin-top: 12px;
+}
+
+.auth-dev-head {
+  margin: 20px 0 6px;
+}
+
+.dev-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dev-identity:hover {
+  background: var(--line-soft);
+}
+
+.btn-block {
+  width: 100%;
+}
+
 /* 表单底部动作：长表单把提交放在内容之后，窄屏固定在底部。 */
 .form-actions {
   display: flex;
