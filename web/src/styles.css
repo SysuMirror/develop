@@ -914,8 +914,15 @@ button {
 .stat-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 8px;
+}
+
+/* 四张卡在中等宽度会变成 3+1，干脆早点折成 2×2。 */
+@media (max-width: 900px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .stat-card {
