@@ -181,8 +181,11 @@ router.get(
     const conditions: string[] = [];
     const filterParams: unknown[] = [];
     if (term) {
-      conditions.push('p.title LIKE ?');
-      filterParams.push(term);
+      // 搜索同时命中名称、说明与技术栈：列表只有一个搜索框，用户不该猜字段。
+      conditions.push(
+        "(p.title LIKE ? OR p.misc LIKE ? OR JSON_SEARCH(COALESCE(p.tech_stack, JSON_ARRAY()), 'one', ?) IS NOT NULL)",
+      );
+      filterParams.push(term, term, term);
     }
     const statusFilter = String(req.query.status || '');
     if ((PROJECT_STATUSES as readonly string[]).includes(statusFilter)) {

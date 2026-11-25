@@ -218,8 +218,11 @@ router.get(
       params.push(user.id);
     }
     if (term) {
-      conditions.push('d.title LIKE ?');
-      params.push(term);
+      // 与项目列表一致：一个搜索框命中标题、详情与标签。
+      conditions.push(
+        "(d.title LIKE ? OR d.detail LIKE ? OR JSON_SEARCH(COALESCE(d.labels, JSON_ARRAY()), 'one', ?) IS NOT NULL)",
+      );
+      params.push(term, term, term);
     }
     const label = String(req.query.label || '').trim();
     if (label) {
