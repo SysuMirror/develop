@@ -3,7 +3,19 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { qs } from '../api';
 import { useApi, useDebounced } from '../hooks';
-import { APPLY_STATUS, PROJECT_DIFFICULTY, PROJECT_STATUS, ROLE, Badge, Empty, Pager, Skeleton, StatusBadge, TimeAgo } from '../ui';
+import {
+  APPLY_STATUS,
+  PROJECT_DIFFICULTY,
+  PROJECT_STATUS,
+  ROLE,
+  Avatar,
+  Badge,
+  Empty,
+  Pager,
+  Skeleton,
+  StatusBadge,
+  TimeAgo,
+} from '../ui';
 import type { Paged, ProjectSummary } from '../types';
 
 interface FilterItem {
@@ -30,13 +42,26 @@ function TechChips({ items }: { items: string[] }) {
   if (items.length === 0) return null;
   return (
     <span className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-      {items.slice(0, 4).map((tech) => (
+      {items.slice(0, 5).map((tech) => (
         <Badge key={tech} tone="gray">
           {tech}
         </Badge>
       ))}
     </span>
   );
+}
+
+/** 把 Markdown 说明压成一行纯文本摘要，让列表自带上下文。 */
+function excerptOf(text: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_`~-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140);
 }
 
 export default function ProjectsPage() {
@@ -64,90 +89,50 @@ export default function ProjectsPage() {
     content = <Empty title="没有匹配的项目" hint="换个筛选条件，或者自己建一个。" />;
   } else {
     content = (
-      <>
-        <div className="table-wrap only-desktop">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>项目</th>
-                <th>所有者</th>
-                <th className="right">成员</th>
-                <th className="right">待接需求</th>
-                <th>状态</th>
-                <th className="right">更新</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((project) => (
-                <tr key={project.id} onClick={() => navigate(`/projects/${project.id}`)} style={{ cursor: 'pointer' }}>
-                  <td>
-                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-                      <span className="cell-title">{project.title}</span>
-                      {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
-                    </div>
-                    {project.techStack.length > 0 ? (
-                      <div style={{ marginTop: 4 }}>
-                        <TechChips items={project.techStack} />
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>{project.owner ? project.owner.name : <span className="faint">—</span>}</td>
-                  <td className="right">{project.memberCount}</td>
-                  <td className="right">
-                    {project.waitingDemandCount > 0 ? (
-                      <Badge tone="amber">{project.waitingDemandCount}</Badge>
-                    ) : (
-                      <span className="faint">0</span>
-                    )}
-                  </td>
-                  <td>
-                    <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                      <StatusBadge map={PROJECT_STATUS} value={project.status} />
-                      <StatusBadge map={PROJECT_DIFFICULTY} value={project.difficulty} />
-                      {!project.myRole && project.myApplyStatus ? (
-                        <StatusBadge map={APPLY_STATUS} value={project.myApplyStatus} />
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="right">
-                    <TimeAgo value={project.updatedAt} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <ul className="card-list only-mobile">
-          {items.map((project) => (
-            <li key={project.id}>
-              <Link className="list-card" to={`/projects/${project.id}`}>
-                <div className="list-card__top">
-                  <span className="list-card__title">{project.title}</span>
-                  <span className="row" style={{ gap: 4 }}>
-                    <StatusBadge map={PROJECT_STATUS} value={project.status} />
-                    <StatusBadge map={PROJECT_DIFFICULTY} value={project.difficulty} />
-                  </span>
-                </div>
-                {project.techStack.length > 0 ? (
-                  <div style={{ marginTop: 4 }}>
-                    <TechChips items={project.techStack} />
-                  </div>
+      <div className="project-grid">
+        {items.map((project) => {
+          const desc = excerptOf(project.misc);
+          return (
+            <Link className="project-card" key={project.id} to={`/projects/${project.id}`}>
+              <div className="project-card__top">
+                <span className="row" style={{ gap: 6, alignItems: 'center', minWidth: 0 }}>
+                  <span className="project-card__title truncate">{project.title}</span>
+                  {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
+                </span>
+                <span className="row" style={{ gap: 4, flexShrink: 0 }}>
+                  <StatusBadge map={PROJECT_STATUS} value={project.status} />
+                  <StatusBadge map={PROJECT_DIFFICULTY} value={project.difficulty} />
+                </span>
+              </div>
+
+              <p className="project-card__desc">{desc || '这个项目还没有写说明。'}</p>
+
+              <TechChips items={project.techStack} />
+
+              <div className="project-card__meta">
+                <span className="project-card__owner">
+                  <Avatar name={project.owner?.name ?? undefined} src={project.owner?.avatar ?? undefined} size="sm" />
+                  {project.owner?.name ?? '—'}
+                </span>
+                <span>{project.memberCount} 位成员</span>
+                <span>
+                  {project.waitingDemandCount > 0 ? (
+                    <Badge tone="amber">{project.waitingDemandCount} 个待接需求</Badge>
+                  ) : (
+                    '暂无待接需求'
+                  )}
+                </span>
+                {!project.myRole && project.myApplyStatus ? (
+                  <StatusBadge map={APPLY_STATUS} value={project.myApplyStatus} />
                 ) : null}
-                <div className="list-card__meta">
-                  <span>所有者 {project.owner ? project.owner.name : '—'}</span>
-                  <span>{project.memberCount} 位成员</span>
-                  <span>
-                    {project.waitingDemandCount > 0 ? `${project.waitingDemandCount} 个待接需求` : '暂无待接需求'}
-                  </span>
-                  <span>
-                    <TimeAgo value={project.updatedAt} />
-                  </span>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </>
+                <span className="faint">
+                  <TimeAgo value={project.updatedAt} />
+                </span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
     );
   }
 
@@ -223,7 +208,6 @@ export default function ProjectsPage() {
       {content}
 
       <Pager page={data?.page ?? page} pageSize={data?.pageSize ?? pageSize} total={data?.total ?? 0} onPage={setPage} />
-
     </div>
   );
 }

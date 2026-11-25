@@ -14,6 +14,8 @@ interface MarkdownEditorProps {
   hint?: ReactNode;
   /** 文本域里按 Ctrl / ⌘ + Enter 时触发，通常是「保存」。 */
   onSubmitShortcut?: () => void;
+  /** 表单里字段多时用紧凑高度，避免一屏被编辑器占满。 */
+  compact?: boolean;
 }
 
 /**
@@ -28,9 +30,10 @@ export function MarkdownEditor({
   label = '内容（Markdown）',
   hint = '支持 Markdown（标题、列表、代码块、表格、链接）；Ctrl / ⌘ + Enter 保存。',
   onSubmitShortcut,
+  compact = false,
 }: MarkdownEditorProps) {
   return (
-    <div className="editor">
+    <div className={compact ? 'editor editor--compact' : 'editor'}>
       <div className="editor__pane">
         <label className="editor__label" htmlFor={id}>
           {label}

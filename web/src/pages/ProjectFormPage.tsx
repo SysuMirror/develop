@@ -206,7 +206,7 @@ function ProjectEditFields({ project }: { project: ProjectDetail }) {
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
           <h1 className="page-title">编辑项目</h1>
-          <p className="page-sub">左侧写 Markdown，右侧实时预览；列表里只显示纯文本摘要。</p>
+          <p className="page-sub">改动会立即体现在项目页；说明与仓库对所有开发者可见，开发说明仅成员可见。</p>
         </div>
         <div className="row page-actions">
           <button type="button" className="btn btn-ghost" onClick={leave} disabled={saving}>
@@ -249,114 +249,124 @@ interface ProjectFieldsProps {
 function ProjectFields({ form, onChange, onSubmitShortcut }: ProjectFieldsProps) {
   return (
     <>
-      <Field label="项目名称" hint={`${form.title.trim().length} 字`}>
-        <input
-          className="input"
-          value={form.title}
-          maxLength={128}
-          placeholder="例如：课程项目归档系统"
-          onChange={(event) => onChange({ ...form, title: event.target.value })}
+      <div className="form-section">
+        <h3>基本信息</h3>
+        <Field label="项目名称" hint={`${form.title.trim().length} 字`}>
+          <input
+            className="input"
+            value={form.title}
+            maxLength={128}
+            placeholder="例如：课程项目归档系统"
+            onChange={(event) => onChange({ ...form, title: event.target.value })}
+          />
+        </Field>
+
+        <div className="form-row-3">
+          <Field label="项目状态" hint="招募中会出现在「招募中」筛选里">
+            <select
+              className="input"
+              value={form.status}
+              onChange={(event) => onChange({ ...form, status: event.target.value as ProjectStatus })}
+            >
+              {Object.entries(PROJECT_STATUS).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="难度" hint="入门友好的项目更容易被新人认领">
+            <select
+              className="input"
+              value={form.difficulty}
+              onChange={(event) => onChange({ ...form, difficulty: event.target.value as ProjectDifficulty })}
+            >
+              {Object.entries(PROJECT_DIFFICULTY).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="技术栈" hint="逗号分隔，例如 React, TypeScript">
+            <input
+              className="input"
+              value={form.techText}
+              placeholder="React, Node.js, MySQL"
+              onChange={(event) => onChange({ ...form, techText: event.target.value })}
+            />
+          </Field>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <h3>对外展示</h3>
+        <MarkdownEditor
+          id="project-misc"
+          label="项目说明（Markdown）"
+          value={form.misc}
+          onChange={(misc) => onChange({ ...form, misc })}
+          placeholder={'这个项目要解决什么问题？技术栈与协作方式是什么？'}
+          previewEmpty="在左侧写项目说明，这里会实时渲染。"
+          hint="对外可见；项目卡片会显示这段说明的摘要，Ctrl / ⌘ + Enter 保存。"
+          onSubmitShortcut={onSubmitShortcut}
+          compact
         />
-      </Field>
 
-      <MarkdownEditor
-        id="project-misc"
-        label="项目说明（Markdown）"
-        value={form.misc}
-        onChange={(misc) => onChange({ ...form, misc })}
-        placeholder={'这个项目要解决什么问题？技术栈与协作方式是什么？'}
-        previewEmpty="在左侧写项目说明，这里会实时渲染。"
-        hint="对外可见；列表里只显示纯文本摘要，Ctrl / ⌘ + Enter 保存。"
-        onSubmitShortcut={onSubmitShortcut}
-      />
-
-      <Field label="仓库地址（可多个，对外可见）" hint="http(s) 链接；留空则不展示，最多 10 个">
-        <div className="stack" style={{ gap: 8 }}>
-          {form.repoUrls.map((url, index) => (
-            <div className="row" key={index} style={{ gap: 8 }}>
-              <input
-                className="input grow"
-                type="url"
-                value={url}
-                maxLength={512}
-                placeholder="https://github.com/owner/repo"
-                onChange={(event) => {
-                  const next = [...form.repoUrls];
-                  next[index] = event.target.value;
-                  onChange({ ...form, repoUrls: next });
-                }}
-              />
+        <Field label="仓库地址（可多个，对外可见）" hint="http(s) 链接；留空则不展示，最多 10 个">
+          <div className="stack" style={{ gap: 8 }}>
+            {form.repoUrls.map((url, index) => (
+              <div className="row" key={index} style={{ gap: 8 }}>
+                <input
+                  className="input grow"
+                  type="url"
+                  value={url}
+                  maxLength={512}
+                  placeholder="https://github.com/owner/repo"
+                  onChange={(event) => {
+                    const next = [...form.repoUrls];
+                    next[index] = event.target.value;
+                    onChange({ ...form, repoUrls: next });
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={form.repoUrls.length <= 1}
+                  onClick={() => onChange({ ...form, repoUrls: form.repoUrls.filter((_, i) => i !== index) })}
+                >
+                  移除
+                </button>
+              </div>
+            ))}
+            <div>
               <button
                 type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={form.repoUrls.length <= 1}
-                onClick={() => onChange({ ...form, repoUrls: form.repoUrls.filter((_, i) => i !== index) })}
+                className="btn btn-secondary btn-sm"
+                disabled={form.repoUrls.length >= 10}
+                onClick={() => onChange({ ...form, repoUrls: [...form.repoUrls, ''] })}
               >
-                移除
+                添加仓库
               </button>
             </div>
-          ))}
-          <div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={form.repoUrls.length >= 10}
-              onClick={() => onChange({ ...form, repoUrls: [...form.repoUrls, ''] })}
-            >
-              添加仓库
-            </button>
           </div>
-        </div>
-      </Field>
-
-      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-        <Field label="项目状态" hint="招募中会出现在「招募中」筛选里">
-          <select
-            className="input"
-            value={form.status}
-            onChange={(event) => onChange({ ...form, status: event.target.value as ProjectStatus })}
-          >
-            {Object.entries(PROJECT_STATUS).map(([key, meta]) => (
-              <option key={key} value={key}>
-                {meta.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="难度" hint="入门友好的项目更容易被新人认领">
-          <select
-            className="input"
-            value={form.difficulty}
-            onChange={(event) => onChange({ ...form, difficulty: event.target.value as ProjectDifficulty })}
-          >
-            {Object.entries(PROJECT_DIFFICULTY).map(([key, meta]) => (
-              <option key={key} value={key}>
-                {meta.label}
-              </option>
-            ))}
-          </select>
         </Field>
       </div>
 
-      <Field label="技术栈（对外可见）" hint="逗号分隔，例如：React, TypeScript, MySQL；最多 10 个">
-        <input
-          className="input"
-          value={form.techText}
-          placeholder="React, Node.js, MySQL"
-          onChange={(event) => onChange({ ...form, techText: event.target.value })}
+      <div className="form-section">
+        <h3>开发资源（仅项目成员）</h3>
+        <MarkdownEditor
+          id="project-dev-notes"
+          label="开发说明（Markdown）"
+          value={form.devNotes}
+          onChange={(devNotes) => onChange({ ...form, devNotes })}
+          placeholder={'本地怎么跑？环境变量、分支约定、发布流程、注意事项……'}
+          previewEmpty="这里写只给成员看的开发说明，非成员看不到。"
+          hint="对内可见：只有项目成员（含所有者/管理员）能看；附件在项目页的「开发说明」里上传。"
+          onSubmitShortcut={onSubmitShortcut}
+          compact
         />
-      </Field>
-
-      <MarkdownEditor
-        id="project-dev-notes"
-        label="开发说明（仅项目成员可见）"
-        value={form.devNotes}
-        onChange={(devNotes) => onChange({ ...form, devNotes })}
-        placeholder={'本地怎么跑？环境变量、分支约定、发布流程、注意事项……'}
-        previewEmpty="这里写只给成员看的开发说明，非成员看不到。"
-        hint="对内可见：只有项目成员（含所有者/管理员）能看；附件在项目页的「开发说明」里上传。"
-        onSubmitShortcut={onSubmitShortcut}
-      />
+      </div>
     </>
   );
 }
