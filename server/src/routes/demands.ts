@@ -51,8 +51,16 @@ function cleanLabels(raw: unknown): string[] {
   return out;
 }
 
-function jsonListOf(raw: unknown): string[] {
-  if (Array.isArray(raw)) return raw.map((item) => String(item)).filter(Boolean);
+/** 统一成毫秒时间戳再比较：MySQL DATETIME 与 ISO 字符串都能吃。 */
+function timeOf(value: unknown): number {
+  if (value == null || value === '') return 0;
+  if (value instanceof Date) return value.getTime();
+  const text = String(value);
+  const parsed = new Date(text.includes('T') ? text : `${text.replace(' ', 'T')}Z`);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function jsonListOf(raw: unknown): string[] {  if (Array.isArray(raw)) return raw.map((item) => String(item)).filter(Boolean);
   if (typeof raw === 'string' && raw.trim()) {
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -281,8 +289,8 @@ router.post(
       if (isDuplicateEntry(error)) throw conflict('DUPLICATE_TITLE', '该项目下已有同名需求');
       throw error;
     }
-    await respond(res, inserted.insertId, user.id);
     res.status(201);
+    await respond(res, inserted.insertId, user.id);
   }),
 );
 
@@ -314,7 +322,7 @@ router.patch(
     const deadlineValue = req.body?.deadline !== undefined ? deadline : (demand.deadline ?? null);
     const metaChanged =
       (acceptance ?? null) !== (demand.acceptance ?? null) ||
-      String(deadlineValue ?? '') !== String(demand.deadline ?? '') ||
+      timeOf(deadlineValue) !== timeOf(demand.deadline) ||
       JSON.stringify(labels) !== JSON.stringify(jsonListOf(demand.labels));
     // 内容没变就不算一次修改：避免点开编辑又原样保存把版本号刷上去。
     if (title === demand.title && nextDetail === (demand.detail ?? null) && !metaChanged) {
