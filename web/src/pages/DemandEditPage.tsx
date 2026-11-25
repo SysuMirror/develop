@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, messageOf } from '../api';
 import { useApi } from '../hooks';
 import { MarkdownEditor } from '../markdown-editor';
-import { Field, Skeleton, useToast } from '../ui';
-import type { DemandItem } from '../types';
+import { DEMAND_DIFFICULTY, Field, Skeleton, useToast } from '../ui';
+import type { DemandDifficulty, DemandItem } from '../types';
 
 export default function DemandEditPage() {
   const { id } = useParams();
@@ -66,6 +66,8 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
     acceptance: demand.acceptance ?? '',
     labels: demand.labels.join(', '),
     deadline: toLocalInput(demand.deadline),
+    difficulty: demand.difficulty ?? '',
+    estimate: demand.estimateHours == null ? '' : String(demand.estimateHours),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +78,9 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
     form.detail !== (demand.detail ?? '') ||
     form.acceptance !== (demand.acceptance ?? '') ||
     form.labels !== demand.labels.join(', ') ||
-    form.deadline !== toLocalInput(demand.deadline);
+    form.deadline !== toLocalInput(demand.deadline) ||
+    form.difficulty !== (demand.difficulty ?? '') ||
+    form.estimate !== (demand.estimateHours == null ? '' : String(demand.estimateHours));
 
   function back() {
     navigate(detailPath);
@@ -99,6 +103,8 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
         acceptance: form.acceptance.trim() || null,
         labels: form.labels.split(',').map((item) => item.trim()).filter(Boolean),
         deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+        difficulty: form.difficulty || null,
+        estimateHours: form.estimate ? Number(form.estimate) : null,
       });
       toast.push('需求已保存。', 'success');
       back();
@@ -164,6 +170,33 @@ function DemandEditForm({ demand }: { demand: DemandItem }) {
             type="datetime-local"
             value={form.deadline}
             onChange={(event) => setForm({ ...form, deadline: event.target.value })}
+          />
+        </Field>
+      </div>
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="难度" hint="新手任务标 starter">
+          <select
+            className="input"
+            value={form.difficulty}
+            onChange={(event) => setForm({ ...form, difficulty: event.target.value as DemandDifficulty | '' })}
+          >
+            <option value="">未标注</option>
+            {Object.entries(DEMAND_DIFFICULTY).map(([key, meta]) => (
+              <option key={key} value={key}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="预计工时（小时）" hint="1-999">
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={999}
+            value={form.estimate}
+            onChange={(event) => setForm({ ...form, estimate: event.target.value })}
           />
         </Field>
       </div>

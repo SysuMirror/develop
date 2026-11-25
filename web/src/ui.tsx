@@ -1,7 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatTime } from './api';
-import type { ApplyStatus, ApplyType, DemandStatus, ProjectDifficulty, ProjectStatus, Role } from './types';
+import type {
+  ApplyStatus,
+  ApplyType,
+  DemandDifficulty,
+  DemandStatus,
+  ProjectDifficulty,
+  ProjectStatus,
+  Role,
+} from './types';
 
 export type Tone = 'gray' | 'amber' | 'green' | 'red' | 'blue';
 export type NoticeTone = 'info' | 'success' | 'error';
@@ -41,6 +49,12 @@ export const PROJECT_STATUS: Record<ProjectStatus, StatusMeta> = {
 export const PROJECT_DIFFICULTY: Record<ProjectDifficulty, StatusMeta> = {
   starter: { label: '入门友好', tone: 'green' },
   standard: { label: '进阶', tone: 'blue' },
+};
+
+export const DEMAND_DIFFICULTY: Record<DemandDifficulty, StatusMeta> = {
+  starter: { label: '新手任务', tone: 'green' },
+  normal: { label: '普通', tone: 'gray' },
+  challenging: { label: '挑战', tone: 'amber' },
 };
 
 export const APPLY_TYPE: Record<ApplyType, StatusMeta> = {

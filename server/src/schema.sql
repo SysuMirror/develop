@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS demands (
   acceptance TEXT NULL,
   deadline DATETIME NULL,
   labels JSON NULL,
+  difficulty ENUM('starter','normal','challenging') NULL,
+  estimate_hours SMALLINT UNSIGNED NULL,
   user_id VARCHAR(36) NULL,
   created_by VARCHAR(36) NULL,
   status ENUM('waiting','accepted','review','completed','suspended') NOT NULL DEFAULT 'waiting',

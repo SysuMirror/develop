@@ -5,6 +5,7 @@ export type DemandStatus = 'waiting' | 'accepted' | 'review' | 'completed' | 'su
 export type Role = 'owner' | 'admin' | 'member';
 export type ProjectStatus = 'recruiting' | 'active' | 'paused' | 'archived';
 export type ProjectDifficulty = 'starter' | 'standard';
+export type DemandDifficulty = 'starter' | 'normal' | 'challenging';
 export type ApplyType = 'leader' | 'participant';
 export type ApplySource = 'web' | 'join';
 export type Qualification = 'ok' | 'none' | 'unknown';
@@ -126,6 +127,8 @@ export interface DemandItem {
   acceptance: string | null;
   deadline: string | null;
   labels: string[];
+  difficulty: DemandDifficulty | null;
+  estimateHours: number | null;
   status: DemandStatus;
   createdAt: string;
   /** 当前版本号，等于被修改的次数；0 表示还是发布时的原文。 */
@@ -176,8 +179,7 @@ export interface MyProfile {
   bio: string | null;
 }
 
-/** GET /api/activity：平台动态时间线。 */
-export interface ActivityItem {
+/** GET /api/activity：平台动态时间线。 */export interface ActivityItem {
   kind: 'project' | 'demand' | 'demand_done';
   id: number;
   title: string;
@@ -195,4 +197,13 @@ export interface DirectoryPerson {
   email: string | null;
   developer: boolean;
   isMember: boolean;
+}
+
+/** GET /api/guide：上手文档。 */
+export interface GuideDoc {
+  slug: string;
+  title: string;
+  summary: string;
+  minutes: number | null;
+  content: string;
 }

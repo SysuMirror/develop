@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { formatTime, qs } from '../api';
 import { useApi, useDebounced } from '../hooks';
-import { DEMAND_STATUS, Badge, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
+import { DEMAND_DIFFICULTY, DEMAND_STATUS, Badge, Empty, Pager, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem, Paged } from '../types';
 
 interface TabItem {
@@ -30,13 +30,14 @@ export default function DemandsPage() {
   const [status, setStatus] = useState('');
   const [scope, setScope] = useState('');
   const [label, setLabel] = useState('');
+  const [starterOnly, setStarterOnly] = useState(false);
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const q = useDebounced(term);
   const labelQ = useDebounced(label);
   const pageSize = 15;
   const { data, loading, error } = useApi<Paged<DemandItem>>(
-    `/demands${qs({ status, scope, label: labelQ, q, page, pageSize })}`,
+    `/demands${qs({ status, scope, label: labelQ, difficulty: starterOnly ? 'starter' : '', q, page, pageSize })}`,
   );
   const items = data?.items ?? [];
 
@@ -71,11 +72,22 @@ export default function DemandsPage() {
                     </Link>
                     {demand.labels.length > 0 ? (
                       <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                        {demand.difficulty ? (
+                          <StatusBadge map={DEMAND_DIFFICULTY} value={demand.difficulty} />
+                        ) : null}
+                        {demand.estimateHours ? <Badge tone="gray">{demand.estimateHours} 小时</Badge> : null}
                         {demand.labels.map((item) => (
                           <Badge key={item} tone="gray">
                             {item}
                           </Badge>
                         ))}
+                      </div>
+                    ) : demand.difficulty || demand.estimateHours ? (
+                      <div className="row" style={{ gap: 4, marginTop: 4 }}>
+                        {demand.difficulty ? (
+                          <StatusBadge map={DEMAND_DIFFICULTY} value={demand.difficulty} />
+                        ) : null}
+                        {demand.estimateHours ? <Badge tone="gray">{demand.estimateHours} 小时</Badge> : null}
                       </div>
                     ) : null}
                   </td>
@@ -110,8 +122,12 @@ export default function DemandsPage() {
                   <span className="list-card__title">{demand.title}</span>
                   <StatusBadge map={DEMAND_STATUS} value={demand.status} />
                 </div>
-                {demand.labels.length > 0 ? (
+                {demand.labels.length > 0 || demand.difficulty || demand.estimateHours ? (
                   <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                    {demand.difficulty ? (
+                      <StatusBadge map={DEMAND_DIFFICULTY} value={demand.difficulty} />
+                    ) : null}
+                    {demand.estimateHours ? <Badge tone="gray">{demand.estimateHours} 小时</Badge> : null}
                     {demand.labels.map((item) => (
                       <Badge key={item} tone="gray">
                         {item}
@@ -192,7 +208,19 @@ export default function DemandsPage() {
         </div>
       </div>
       <div className="toolbar" style={{ marginTop: -6 }}>
-        <span className="faint">按标签筛选</span>
+        <div className="filter-chips">
+          <button
+            type="button"
+            className={starterOnly ? 'chip active' : 'chip'}
+            onClick={() => {
+              setStarterOnly(!starterOnly);
+              setPage(1);
+            }}
+          >
+            只看新手任务
+          </button>
+          <span className="faint">按标签筛选</span>
+        </div>
         <div className="search">
           <input
             className="input"

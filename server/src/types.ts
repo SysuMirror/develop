@@ -4,6 +4,7 @@
 export type Role = 'owner' | 'admin' | 'member';
 export type ProjectStatus = 'recruiting' | 'active' | 'paused' | 'archived';
 export type ProjectDifficulty = 'starter' | 'standard';
+export type DemandDifficulty = 'starter' | 'normal' | 'challenging';
 export type ApplyType = 'leader' | 'participant';
 export type ApplyStatus = 'waiting' | 'accepted' | 'rejected';
 export type ApplySource = 'web' | 'join';
@@ -108,6 +109,8 @@ export interface DemandRow {
   acceptance: string | null;
   deadline: Date | null;
   labels: unknown;
+  difficulty: DemandDifficulty;
+  estimate_hours: number | null;
   status: DemandStatus;
   created_by: string;
   user_id: string | null;

@@ -1850,3 +1850,79 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* 「上手」页：左侧目录 + 右侧内容 */
+.guide-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.guide-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  position: sticky;
+  top: 16px;
+}
+.guide-nav__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.guide-nav__item:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+.guide-nav__item.active {
+  background: rgba(92, 139, 255, 0.12);
+  color: var(--accent, #3b6ef5);
+  font-weight: 600;
+}
+.guide-content__title {
+  margin: 0 0 4px;
+}
+
+/* 新人四步引导 */
+.newcomer {
+  margin-bottom: 14px;
+}
+.newcomer__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0 4px 4px 20px;
+  font-size: 13.5px;
+}
+.newcomer__steps a {
+  color: inherit;
+  text-decoration: none;
+}
+.newcomer__steps a:hover {
+  color: var(--accent, #3b6ef5);
+}
+@media (max-width: 900px) {
+  .guide-layout {
+    grid-template-columns: 1fr;
+  }
+  .guide-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .newcomer__steps {
+    grid-template-columns: 1fr 1fr;
+  }
+}

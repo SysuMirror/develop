@@ -1,66 +1,59 @@
-import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { qs } from '../api';
 import { useAuth } from '../auth';
 import { latest, useApi, useDemandFeed } from '../hooks';
-import { APPLY_TYPE, DEMAND_STATUS, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
-import type { ActivityItem, ApplyItem, DemandItem, Paged, ProjectSummary } from '../types';
+import { DEMAND_STATUS, ROLE, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
+import type { ActivityItem, ApplyItem, Paged, ProjectSummary } from '../types';
 
 const PREVIEW = 5;
 const PAGE_SIZE = 100;
 
-interface PreviewPanelProps {
-  title: string;
-  count: ReactNode;
-  moreTo?: string;
-  loading: boolean;
-  error: string | null;
-  empty: boolean;
-  emptyText: string;
-  children: ReactNode;
-}
+const CHECKLIST_KEY = 'develop:newcomer-checklist:hidden';
 
-function PreviewPanel({ title, count, moreTo, loading, error, empty, emptyText, children }: PreviewPanelProps) {
-  let body: ReactNode;
-  if (loading) body = <Skeleton rows={3} />;
-  else if (error) body = <div className="notice notice-error">{error}</div>;
-  else if (empty) body = <div className="home-panel__empty">{emptyText}</div>;
-  else body = <div className="list">{children}</div>;
-
+/** 新人引导：没有加入任何项目时显示，可手动关闭。 */
+function NewcomerChecklist({ show }: { show: boolean }) {
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem(CHECKLIST_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (!show || hidden) return null;
+  const steps = [
+    { label: '读《环境与账号》', to: '/guide' },
+    { label: '逛项目，申请加入一个', to: '/projects' },
+    { label: '接一个新手任务', to: '/demands?difficulty=starter' },
+    { label: '读《需求流程》', to: '/guide' },
+  ];
   return (
-    <section className="panel home-panel">
+    <section className="panel newcomer">
       <div className="panel__head">
-        <h3>{title}</h3>
-        <div className="home-panel__meta">
-          <span className="faint">{count}</span>
-          {moreTo ? (
-            <Link className="btn-link" to={moreTo}>
-              查看全部
-            </Link>
-          ) : null}
-        </div>
+        <h3>第一次来？按这四步开始</h3>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => {
+            setHidden(true);
+            try {
+              window.localStorage.setItem(CHECKLIST_KEY, '1');
+            } catch {
+              /* 无痕模式忽略 */
+            }
+          }}
+        >
+          知道了
+        </button>
       </div>
-      {body}
+      <ol className="newcomer__steps">
+        {steps.map((step) => (
+          <li key={step.label}>
+            <Link to={step.to}>{step.label}</Link>
+          </li>
+        ))}
+      </ol>
     </section>
-  );
-}
-
-function DemandRow({ demand, time, extra }: { demand: DemandItem; time: string | null; extra?: ReactNode }) {
-  return (
-    <div className="list__row">
-      <div className="grow">
-        <Link className="home-panel__title truncate" to={`/demands/${demand.id}`}>
-          {demand.title}
-        </Link>
-        <div className="faint truncate">
-          <Link to={`/projects/${demand.project.id}`}>{demand.project.title}</Link>
-          {extra}
-          {' · '}
-          <TimeAgo value={time} />
-        </div>
-      </div>
-      <StatusBadge map={DEMAND_STATUS} value={demand.status} />
-    </div>
   );
 }
 
@@ -80,6 +73,13 @@ export default function HomePage() {
   // 所有者/管理员与成员互斥，两个 total 相加即「我加入的全部项目」。
   const joinedCount = (myProjects.data?.total ?? 0) + (memberProjects.data?.total ?? 0);
   const joinedLoading = myProjects.loading || memberProjects.loading;
+
+  const reviewDemands = feed.items.filter((demand) => demand.creator?.id === myId && demand.status === 'review');
+  const myProjectItems = [...leading, ...(memberProjects.data?.items ?? [])].filter(
+    (project, index, list) => list.findIndex((item) => item.id === project.id) === index,
+  );
+  const todoCount = inboxItems.length + ongoing.length + reviewDemands.length;
+  const todoLoading = inbox.loading || feed.loading;
 
   const stats = [
     {
@@ -117,6 +117,8 @@ export default function HomePage() {
         </div>
       </div>
 
+      <NewcomerChecklist show={!joinedLoading && joinedCount === 0} />
+
       <div className="stat-grid">
         {stats.map((stat) => (
           <Link className="stat-card" key={stat.to} to={stat.to}>
@@ -130,78 +132,102 @@ export default function HomePage() {
       <div className="home-columns">
         <div>
           <div className="section-head">
-            <h2>与我有关</h2>
-            <span className="faint">需要你处理或你正在推进的</span>
+            <h2>待我处理</h2>
+            <span className="faint">审批、进行中的需求、待你验收</span>
           </div>
-
-          <PreviewPanel
-            title="待我审批的申请"
-            count={`${inboxItems.length} 条`}
-            moreTo="/me"
-            loading={inbox.loading}
-            error={inbox.error ? inbox.error.message : null}
-            empty={inboxItems.length === 0}
-            emptyText="没有等你审批的申请。"
-          >
-            {inboxItems.slice(0, PREVIEW).map((apply) => (
-              <div className="list__row" key={apply.id}>
-                <div className="grow">
-                  <Link className="home-panel__title truncate" to={`/projects/${apply.project.id}`}>
-                    {apply.project.title}
-                  </Link>
-                  <div className="faint truncate">
-                    {displayName(apply.user)} · {APPLY_TYPE[apply.type].label} ·{' '}
-                    <TimeAgo value={apply.createdAt} />
-                  </div>
-                </div>
-                <Link className="btn-link" to={`/projects/${apply.project.id}`}>
-                  去审批
+          <section className="panel home-panel">
+            <div className="panel__head">
+              <h3>待办</h3>
+              <div className="home-panel__meta">
+                <span className="faint">{todoCount} 项</span>
+                <Link className="btn-link" to="/me">
+                  全部
                 </Link>
               </div>
-            ))}
-          </PreviewPanel>
-
-          <PreviewPanel
-            title="我接下的进行中需求"
-            count={`${myDemands.length} 条`}
-            loading={feed.loading}
-            error={feed.error}
-            empty={myDemands.length === 0}
-            emptyText="还没有你接下的需求，去需求页看看。"
-          >
-            {ongoing.map((demand) => (
-              <DemandRow
-                key={demand.id}
-                demand={demand}
-                time={demand.acceptedAt ?? demand.createdAt}
-                extra={demand.creator ? ` · 发布者 ${displayName(demand.creator)}` : null}
-              />
-            ))}
-          </PreviewPanel>
-
-          <PreviewPanel
-            title="我负责的项目"
-            count={`${myProjects.data?.total ?? 0} 个`}
-            moreTo="/projects?filter=mine-owner"
-            loading={myProjects.loading}
-            error={myProjects.error ? myProjects.error.message : null}
-            empty={leading.length === 0}
-            emptyText="你还没有负责的项目。"
-          >
-            {leading.slice(0, PREVIEW).map((project) => (
-              <div className="list__row" key={project.id}>
-                <div className="grow">
-                  <Link className="home-panel__title truncate" to={`/projects/${project.id}`}>
-                    {project.title}
-                  </Link>
-                  <div className="faint truncate">
-                    {project.memberCount} 位成员 · {project.waitingDemandCount} 个待接需求 ·{' '}
-                    {project.pendingApplyCount} 条待审批 · <TimeAgo value={project.createdAt} />
+            </div>
+            {todoLoading ? (
+              <Skeleton rows={3} />
+            ) : todoCount === 0 ? (
+              <div className="home-panel__empty">没有需要你处理的事。</div>
+            ) : (
+              <div className="list">
+                {inboxItems.slice(0, PREVIEW).map((apply) => (
+                  <div className="list__row" key={`apply-${apply.id}`}>
+                    <div className="grow">
+                      <Link className="home-panel__title truncate" to={`/projects/${apply.project.id}`}>
+                        {apply.project.title}
+                      </Link>
+                      <div className="faint truncate">
+                        加入申请 · {displayName(apply.user)} · <TimeAgo value={apply.createdAt} />
+                      </div>
+                    </div>
+                    <Link className="btn-link" to={`/projects/${apply.project.id}`}>
+                      去审批
+                    </Link>
                   </div>
-                </div>
+                ))}
+                {ongoing.map((demand) => (
+                  <div className="list__row" key={`ongoing-${demand.id}`}>
+                    <div className="grow">
+                      <Link className="home-panel__title truncate" to={`/demands/${demand.id}`}>
+                        {demand.title}
+                      </Link>
+                      <div className="faint truncate">
+                        我接的需求 · {demand.project.title} ·{' '}
+                        <TimeAgo value={demand.acceptedAt ?? demand.createdAt} />
+                      </div>
+                    </div>
+                    <StatusBadge map={DEMAND_STATUS} value={demand.status} />
+                  </div>
+                ))}
+                {reviewDemands.map((demand) => (
+                  <div className="list__row" key={`review-${demand.id}`}>
+                    <div className="grow">
+                      <Link className="home-panel__title truncate" to={`/demands/${demand.id}`}>
+                        {demand.title}
+                      </Link>
+                      <div className="faint truncate">
+                        待你验收 · {demand.project.title} ·{' '}
+                        <TimeAgo value={demand.submittedAt ?? demand.createdAt} />
+                      </div>
+                    </div>
+                    <Link className="btn-link" to={`/demands/${demand.id}`}>
+                      去验收
+                    </Link>
+                  </div>
+                ))}
               </div>
-            ))}
-          </PreviewPanel>
+            )}
+          </section>
+
+          <div className="section-head">
+            <h2>我的项目</h2>
+            <span className="faint">{myProjectItems.length} 个</span>
+          </div>
+          <section className="panel home-panel">
+            {myProjects.loading ? (
+              <Skeleton rows={3} />
+            ) : myProjectItems.length === 0 ? (
+              <div className="home-panel__empty">还没有参与项目，去项目列表看看。</div>
+            ) : (
+              <div className="list">
+                {myProjectItems.slice(0, 8).map((project) => (
+                  <div className="list__row" key={project.id}>
+                    <div className="grow">
+                      <Link className="home-panel__title truncate" to={`/projects/${project.id}`}>
+                        {project.title}
+                      </Link>
+                      <div className="faint truncate">
+                        {project.memberCount} 位成员 · {project.waitingDemandCount} 个待接需求 ·{' '}
+                        <TimeAgo value={project.updatedAt} />
+                      </div>
+                    </div>
+                    {project.myRole ? <StatusBadge map={ROLE} value={project.myRole} /> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
         <div>

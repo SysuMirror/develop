@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, messageOf } from '../api';
 import { useApi } from '../hooks';
 import { MarkdownEditor } from '../markdown-editor';
-import { Field, Skeleton, useToast } from '../ui';
-import type { ProjectDetail } from '../types';
+import { DEMAND_DIFFICULTY, Field, Skeleton, useToast } from '../ui';
+import type { DemandDifficulty, ProjectDetail } from '../types';
 
 export default function DemandNewPage() {
   const { id } = useParams();
@@ -51,7 +51,15 @@ export default function DemandNewPage() {
 function DemandNewForm({ project }: { project: ProjectDetail }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const [form, setForm] = useState({ title: '', detail: '', acceptance: '', labels: '', deadline: '' });
+  const [form, setForm] = useState({
+    title: '',
+    detail: '',
+    acceptance: '',
+    labels: '',
+    deadline: '',
+    difficulty: '',
+    estimate: '',
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,7 +69,9 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
     form.detail.trim() !== '' ||
     form.acceptance.trim() !== '' ||
     form.labels.trim() !== '' ||
-    form.deadline !== '';
+    form.deadline !== '' ||
+    form.difficulty !== '' ||
+    form.estimate !== '';
 
   function leave() {
     if (dirty && !window.confirm('放弃尚未发布的需求？')) return;
@@ -80,6 +90,8 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
         acceptance: form.acceptance.trim() || null,
         labels: form.labels.split(',').map((item) => item.trim()).filter(Boolean),
         deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+        difficulty: form.difficulty || null,
+        estimateHours: form.estimate ? Number(form.estimate) : null,
       });
       toast.push('需求已发布。', 'success');
       navigate(`/demands/${created.id}`);
@@ -144,6 +156,33 @@ function DemandNewForm({ project }: { project: ProjectDetail }) {
             type="datetime-local"
             value={form.deadline}
             onChange={(event) => setForm({ ...form, deadline: event.target.value })}
+          />
+        </Field>
+      </div>
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="难度" hint="新手任务请标 starter，方便新人认领">
+          <select
+            className="input"
+            value={form.difficulty}
+            onChange={(event) => setForm({ ...form, difficulty: event.target.value as DemandDifficulty | '' })}
+          >
+            <option value="">未标注</option>
+            {Object.entries(DEMAND_DIFFICULTY).map(([key, meta]) => (
+              <option key={key} value={key}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="预计工时（小时）" hint="1-999，估不准取上限">
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={999}
+            value={form.estimate}
+            onChange={(event) => setForm({ ...form, estimate: event.target.value })}
           />
         </Field>
       </div>

@@ -188,6 +188,16 @@ async function migrate(): Promise<void> {
   await ensureColumn('demands', 'acceptance', 'ALTER TABLE demands ADD COLUMN acceptance TEXT NULL AFTER detail');
   await ensureColumn('demands', 'deadline', 'ALTER TABLE demands ADD COLUMN deadline DATETIME NULL AFTER acceptance');
   await ensureColumn('demands', 'labels', 'ALTER TABLE demands ADD COLUMN labels JSON NULL AFTER deadline');
+  await ensureColumn(
+    'demands',
+    'difficulty',
+    "ALTER TABLE demands ADD COLUMN difficulty ENUM('starter','normal','challenging') NULL AFTER labels",
+  );
+  await ensureColumn(
+    'demands',
+    'estimate_hours',
+    'ALTER TABLE demands ADD COLUMN estimate_hours SMALLINT UNSIGNED NULL AFTER difficulty',
+  );
   await ensureColumn('user_profile', 'skills', 'ALTER TABLE user_profile ADD COLUMN skills JSON NULL AFTER email');
   await ensureColumn('user_profile', 'github', 'ALTER TABLE user_profile ADD COLUMN github VARCHAR(128) NULL AFTER skills');
   await ensureColumn('user_profile', 'grade', 'ALTER TABLE user_profile ADD COLUMN grade VARCHAR(32) NULL AFTER github');

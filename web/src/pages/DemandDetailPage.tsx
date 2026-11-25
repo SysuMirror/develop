@@ -4,7 +4,7 @@ import { DemandActions } from '../demand-actions';
 import { DemandRevisions } from '../demand-revisions';
 import { useApi } from '../hooks';
 import { MarkdownText } from '../markdown';
-import { DEMAND_STATUS, Badge, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
+import { DEMAND_DIFFICULTY, DEMAND_STATUS, Badge, Skeleton, StatusBadge, TimeAgo, displayName } from '../ui';
 import type { DemandItem } from '../types';
 
 export default function DemandDetailPage() {
@@ -58,6 +58,8 @@ export default function DemandDetailPage() {
                 {label}
               </Badge>
             ))}
+            {demand.difficulty ? <StatusBadge map={DEMAND_DIFFICULTY} value={demand.difficulty} /> : null}
+            {demand.estimateHours ? <Badge tone="gray">预计 {demand.estimateHours} 小时</Badge> : null}
           </div>
         </div>
         <div className="row page-actions">

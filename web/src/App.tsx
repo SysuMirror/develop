@@ -12,6 +12,7 @@ import ApplyPage from './pages/ApplyPage';
 import DemandsPage from './pages/DemandsPage';
 import DemandDetailPage from './pages/DemandDetailPage';
 import DemandEditPage from './pages/DemandEditPage';
+import GuidePage from './pages/GuidePage';
 import ProfilePage from './pages/ProfilePage';
 import LoginPage from './pages/LoginPage';
 import NoQualificationPage from './pages/NoQualificationPage';
@@ -22,7 +23,7 @@ interface NavItem {
   end?: boolean;
 }
 
-type NavIconName = 'home' | 'projects' | 'demands' | 'me';
+type NavIconName = 'home' | 'projects' | 'demands' | 'guide' | 'me';
 
 interface MobileNavItem extends NavItem {
   icon: NavIconName;
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { to: '/', label: '概览', end: true },
   { to: '/projects', label: '项目' },
   { to: '/demands', label: '需求' },
+  { to: '/guide', label: '上手' },
   { to: '/me', label: '我的' },
 ];
 
@@ -39,6 +41,7 @@ const MOBILE_NAV: MobileNavItem[] = [
   { to: '/', label: '概览', end: true, icon: 'home' },
   { to: '/projects', label: '项目', icon: 'projects' },
   { to: '/demands', label: '需求', icon: 'demands' },
+  { to: '/guide', label: '上手', icon: 'guide' },
   { to: '/me', label: '我的', icon: 'me' },
 ];
 
@@ -66,6 +69,15 @@ function NavIcon({ name }: { name: NavIconName }) {
       <svg className="mobile-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M9 6h11M9 12h11M9 18h11" />
         <path d="M4.5 5.5 5.5 6.5 7.5 4.5M4.5 11.5 5.5 12.5 7.5 10.5M4.5 17.5 5.5 18.5 7.5 16.5" />
+      </svg>
+    );
+  }
+  if (name === 'guide') {
+    return (
+      <svg className="mobile-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z" />
+        <path d="M5 20.5V5.5" />
+        <path d="M9 7.5h6M9 11h4" />
       </svg>
     );
   }
@@ -312,6 +324,14 @@ export default function App() {
           element={
             <RequireAuth>
               <DemandDetailPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="guide"
+          element={
+            <RequireAuth>
+              <GuidePage />
             </RequireAuth>
           }
         />

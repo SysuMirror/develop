@@ -182,24 +182,45 @@ export default function ProjectDetailPage() {
           <dd>
             <TimeAgo value={data.createdAt} />
           </dd>
-          {data.repoUrls.length > 0 ? (
-            <>
-              <dt>仓库</dt>
-              <dd>
-                {data.repoUrls.map((url) => (
-                  <div className="truncate" key={url}>
-                    <a className="btn-link" href={url} target="_blank" rel="noreferrer">
-                      {url}
-                    </a>
-                  </div>
-                ))}
-              </dd>
-            </>
-          ) : null}
           <dt>我的角色</dt>
           <dd>{data.myRole ? <StatusBadge map={ROLE} value={data.myRole} /> : <span className="faint">非成员</span>}</dd>
         </dl>
       </div>
+
+      {data.repoUrls.length > 0 ? (
+        <>
+          <div className="section-head">
+            <h2>快速开始</h2>
+            <span className="faint">克隆到本地开始开发</span>
+          </div>
+          <div className="panel">
+            <div className="list">
+              {data.repoUrls.map((url) => (
+                <div className="list__row" key={url}>
+                  <div className="grow">
+                    <a className="cell-title" href={url} target="_blank" rel="noreferrer">
+                      {url}
+                    </a>
+                    <div className="faint truncate">git clone {url}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      void navigator.clipboard
+                        ?.writeText(`git clone ${url}`)
+                        .then(() => push('克隆命令已复制', 'success'))
+                        .catch(() => push('复制失败，请手动选择命令', 'error'));
+                    }}
+                  >
+                    复制命令
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {data.misc && data.misc.trim() ? (
         <>

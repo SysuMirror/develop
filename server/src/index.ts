@@ -11,6 +11,7 @@ import { warm as warmDirectory } from './directory.ts';
 import appliesRouter from './routes/applies.ts';
 import demandsRouter from './routes/demands.ts';
 import filesRouter from './routes/files.ts';
+import guideRouter from './routes/guide.ts';
 import joinRouter from './routes/join.ts';
 import profileRouter from './routes/profile.ts';
 import activityRouter from './routes/activity.ts';
@@ -76,6 +77,7 @@ export function createApp(): express.Express {
   app.use('/api', filesRouter);
   app.use('/api', profileRouter);
   app.use('/api', activityRouter);
+  app.use('/api', guideRouter);
   app.use('/api', appliesRouter);
   app.use('/api', demandsRouter);
   app.use('/api', (_req, res) => {

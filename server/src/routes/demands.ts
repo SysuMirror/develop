@@ -3,12 +3,20 @@ import { loadMembership, loadProject, requireMember } from '../access.ts';
 import { isDuplicateEntry, one, query, withTx } from '../db.ts';
 import { getUsers, userRef } from '../directory.ts';
 import { badRequest, conflict, forbidden, likeTerm, notFound, parsePaging, wrap } from '../http.ts';
-import type { DemandJoinedRow, DemandRevisionRow, DemandRow, DemandStatus, DirectoryUser } from '../types.ts';
+import type {
+  DemandDifficulty,
+  DemandJoinedRow,
+  DemandRevisionRow,
+  DemandRow,
+  DemandStatus,
+  DirectoryUser,
+} from '../types.ts';
 
 const router = Router();
 
 const DEMAND_SELECT = `
-  SELECT d.id, d.title, d.detail, d.acceptance, d.deadline, d.labels, d.status, d.status_before_suspend,
+  SELECT d.id, d.title, d.detail, d.acceptance, d.deadline, d.labels,
+         d.difficulty, d.estimate_hours, d.status, d.status_before_suspend,
          d.created_at, d.accepted_at, d.submitted_at, d.completed_at,
          d.created_by,
          d.user_id, d.revision,
@@ -19,6 +27,28 @@ const DEMAND_SELECT = `
 const SUSPENDABLE: DemandStatus[] = ['waiting', 'accepted', 'review'];
 // 待确认、已完成的需求已经进入验收／结案，改动会让验收对象和记录失真。
 const EDITABLE: DemandStatus[] = ['waiting', 'accepted', 'suspended'];
+
+/** 需求难度：starter（新手）/ normal / challenging。 */
+const DEMAND_DIFFICULTIES = ['starter', 'normal', 'challenging'] as const;
+
+function cleanDemandDifficulty(raw: unknown): DemandDifficulty | null {
+  if (raw == null || raw === '') return null;
+  const value = String(raw);
+  if (!(DEMAND_DIFFICULTIES as readonly string[]).includes(value)) {
+    throw badRequest('BAD_DIFFICULTY', '难度只能是 starter / normal / challenging');
+  }
+  return value as DemandDifficulty;
+}
+
+/** 预计工时：1-999 小时，留空表示没估。 */
+function cleanEstimate(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 999) {
+    throw badRequest('BAD_ESTIMATE', '预计工时是 1-999 的整数（小时）');
+  }
+  return value;
+}
 
 /** 「验收标准」是自由文本，最长 5000 字。 */
 function cleanAcceptance(raw: unknown): string | null {
@@ -127,6 +157,8 @@ function mapDemand(
     acceptance: row.acceptance,
     deadline: row.deadline,
     labels: jsonListOf(row.labels),
+    difficulty: row.difficulty ?? null,
+    estimateHours: row.estimate_hours == null ? null : Number(row.estimate_hours),
     status: row.status,
     createdAt: row.created_at,
     revision: Number(row.revision),
@@ -193,6 +225,11 @@ router.get(
     if (label) {
       conditions.push('JSON_CONTAINS(COALESCE(d.labels, JSON_ARRAY()), JSON_QUOTE(?))');
       params.push(label);
+    }
+    const difficultyFilter = String(req.query.difficulty || '');
+    if ((DEMAND_DIFFICULTIES as readonly string[]).includes(difficultyFilter)) {
+      conditions.push('d.difficulty = ?');
+      params.push(difficultyFilter);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = await query<DemandJoinedRow>(
@@ -262,6 +299,8 @@ router.post(
     const acceptance = cleanAcceptance(req.body?.acceptance);
     const deadline = cleanDeadline(req.body?.deadline);
     const labels = cleanLabels(req.body?.labels);
+    const difficulty = cleanDemandDifficulty(req.body?.difficulty);
+    const estimateHours = cleanEstimate(req.body?.estimateHours);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
     const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ?', [
       project.id,
@@ -273,9 +312,9 @@ router.post(
       // 需求行与 v0 快照同事务写入：只落半边会让修订历史少了发布时的原文。
       inserted = await withTx(async (conn) => {
         const [result] = await conn.query(
-          `INSERT INTO demands (project_id, title, detail, acceptance, deadline, labels, created_by, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting')`,
-          [project.id, title, detail, acceptance, deadline, JSON.stringify(labels), user.id],
+          `INSERT INTO demands (project_id, title, detail, acceptance, deadline, labels, difficulty, estimate_hours, created_by, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')`,
+          [project.id, title, detail, acceptance, deadline, JSON.stringify(labels), difficulty, estimateHours, user.id],
         );
         const header = result as { insertId: number };
         await conn.query(
@@ -311,6 +350,10 @@ router.patch(
       req.body?.acceptance !== undefined ? cleanAcceptance(req.body.acceptance) : (demand.acceptance ?? null);
     const deadline = req.body?.deadline !== undefined ? cleanDeadline(req.body.deadline) : null;
     const labels = req.body?.labels !== undefined ? cleanLabels(req.body.labels) : jsonListOf(demand.labels);
+    const difficulty =
+      req.body?.difficulty !== undefined ? cleanDemandDifficulty(req.body.difficulty) : (demand.difficulty ?? null);
+    const estimateHours =
+      req.body?.estimateHours !== undefined ? cleanEstimate(req.body.estimateHours) : (demand.estimate_hours ?? null);
     if (!title || title.length > 128) throw badRequest('BAD_TITLE', '需求标题必填，且不超过 128 字');
     const duplicate = await one<{ id: number }>('SELECT id FROM demands WHERE project_id = ? AND title = ? AND id <> ?', [
       demand.project_id,
@@ -323,7 +366,9 @@ router.patch(
     const metaChanged =
       (acceptance ?? null) !== (demand.acceptance ?? null) ||
       timeOf(deadlineValue) !== timeOf(demand.deadline) ||
-      JSON.stringify(labels) !== JSON.stringify(jsonListOf(demand.labels));
+      JSON.stringify(labels) !== JSON.stringify(jsonListOf(demand.labels)) ||
+      (difficulty ?? null) !== (demand.difficulty ?? null) ||
+      (estimateHours ?? null) !== (demand.estimate_hours ?? null);
     // 内容没变就不算一次修改：避免点开编辑又原样保存把版本号刷上去。
     if (title === demand.title && nextDetail === (demand.detail ?? null) && !metaChanged) {
       await respond(res, demand.id, user.id);
@@ -334,8 +379,19 @@ router.patch(
     try {
       await withTx(async (conn) => {
         await conn.query(
-          'UPDATE demands SET title = ?, detail = ?, acceptance = ?, deadline = ?, labels = ?, revision = ? WHERE id = ?',
-          [title, nextDetail, acceptance, deadlineValue, JSON.stringify(labels), nextRevision, demand.id],
+          `UPDATE demands SET title = ?, detail = ?, acceptance = ?, deadline = ?, labels = ?,
+                  difficulty = ?, estimate_hours = ?, revision = ? WHERE id = ?`,
+          [
+            title,
+            nextDetail,
+            acceptance,
+            deadlineValue,
+            JSON.stringify(labels),
+            difficulty,
+            estimateHours,
+            nextRevision,
+            demand.id,
+          ],
         );
         if (contentChanged) {
           await conn.query(

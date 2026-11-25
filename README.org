@@ -55,6 +55,10 @@ applies、demands、demand_revision，外加三张辅助表：sessions（登录�
   读写；只用于本站展示，姓名头像邮箱仍以 UniSSO 目录为准。
 - 平台动态： =GET /api/activity?limit= = 合并最近新建项目、需求发布与需求完成三类事件。
 - 新建项目 / 新建需求支持从模板预填（纯前端，不创建仓库也不改目录）。
+- 「上手」： =GET /api/guide= 读取仓库 =docs/guide/*.md= （标题、摘要、预计阅读时间、正文），
+  站点只读渲染；前三篇是环境与账号、仓库与分支、需求流程。
+- 需求另有 =difficulty= （starter/normal/challenging）与 =estimate_hours= ；列表支持
+  =difficulty= 过滤，首页「待我处理」聚合审批、进行中需求与待验收需求。
 
 需求接口没有按接单人与完成时间过滤的参数，首页按每页 100 条最多翻 5 页拉回后在前端切分；
 超过 500 条时「最近」两组只覆盖已拉取的 500 条，并在标题旁标注。
