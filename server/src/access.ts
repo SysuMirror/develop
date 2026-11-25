@@ -41,8 +41,14 @@ export async function requireOwner(project: ProjectRef, user: SessionUser): Prom
   throw forbidden('NOT_OWNER', '只有项目所有者可以执行该操作');
 }
 
-export async function requireApplyDecider(project: ProjectRef, user: SessionUser): Promise<void> {
-  await requireManager(project, user);
+/** 申请行里已经带了项目 id 与建项人，审批时直接用它，别拿申请 id 当项目 id。 */
+interface ApplyProjectRef {
+  project_id: number;
+  leader_id: string | null;
+}
+
+export async function requireApplyDecider(apply: ApplyProjectRef, user: SessionUser): Promise<void> {
+  await requireManager({ id: apply.project_id, leader_id: apply.leader_id }, user);
 }
 
 export async function requireMember(projectId: unknown, user: SessionUser): Promise<MembershipRow> {
